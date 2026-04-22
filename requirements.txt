@@ -1,0 +1,6 @@
+torch 
+transformers 
+pandas 
+PyQt5 
+faiss-cpu 
+ffmpeg-python 
