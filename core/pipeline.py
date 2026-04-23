@@ -1,6 +1,6 @@
 """
 Центральный контроллер (Оркестратор) системы.
-Связывает вместе Scanner, Extractor, EnrichmentService и нашу нейросеть NER.
+Связывает вместе Scanner, Extractor, EnrichmentService, NERPredictor и FAISS.
 """
 
 import sqlite3
@@ -13,35 +13,29 @@ from core.scanner import DirectoryScanner
 from core.extractor import TechnicalMetadataExtractor
 from core.enrichment import EnrichmentService
 from core.ner_predictor import NERPredictor
+from core.vector_db import SemanticSearchEngine
 from core.exceptions import DatabaseConnectionError
 
 logger = logging.getLogger(__name__)
 
 class MediaPipeline:
-    """
-    Главный класс обработки. Управляет жизненным циклом данных:
-    Сканирование -> Извлечение технических данных -> Обогащение -> NER анализ -> Сохранение.
-    """
-    
     def __init__(self):
-        logger.info("Инициализация Интеллектуального Ядра v3.0...")
+        logger.info("Инициализация Интеллектуального Ядра v4.0 (С поддержкой FAISS)...")
         self.extractor = TechnicalMetadataExtractor()
         self.enricher = EnrichmentService()
-        self.ner = NERPredictor()  # Подключаем наш ИИ-модуль
+        self.ner = NERPredictor()
+        self.vector_db = SemanticSearchEngine()  # Инициализация Векторной БД
         self._init_db_connection()
 
     def _init_db_connection(self):
-        """Проверка доступа к базе данных SQLite с использованием конфига."""
         if not settings.db_path.exists():
-            logger.error(f"БД не найдена по пути: {settings.db_path}. Запустите python db/init_db.py")
+            logger.error(f"БД не найдена по пути: {settings.db_path}")
         self.conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
 
     def process_directory(self, target_dir: str) -> None:
-        """Полный цикл обработки папки с медиафайлами."""
         scanner = DirectoryScanner(target_dir)
         inventory = scanner.scan()
         
-        # Разворачиваем словарь в плоский список файлов для обработки
         files_to_process: List[MediaFile] = []
         for media_list in inventory.values():
             files_to_process.extend(media_list)
@@ -51,63 +45,86 @@ class MediaPipeline:
             return
 
         logger.info(f"Начало обработки {len(files_to_process)} файлов...")
-        
         for media in files_to_process:
             self._process_single_file(media)
             
         logger.info("Пайплайн завершил работу.")
 
     def _process_single_file(self, media: MediaFile) -> None:
-        """Обработка одного файла: Экстракция -> Обогащение -> NER -> БД."""
         logger.info(f"Анализ: {media.name}")
         
-        # 1. Извлечение технических метаданных
         tech_meta: MediaMetadata = self.extractor.extract(media)
         
-        # 2. Семантическое обогащение (IMDb, Shazam, OCR)
         if tech_meta.status == 'error':
             logger.warning(f"Файл не читается. Пропуск глубокого анализа: {media.name}")
             enrich_meta = {'extracted_title': media.name} 
         else:
             enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
             
-        # 3. Инференс нашей дообученной NER-нейросети!
-        # (Она работает всегда, так как анализирует строку с именем файла)
+        # Инференс NER
         ner_extracted = self.ner.extract_entities(media.name)
         enrich_meta['ner_analysis'] = ner_extracted
         logger.info(f"NER извлек: {ner_extracted}")
 
-        # 4. Сохранение в базу
+        # =======================================================
+        # ИНТЕГРАЦИЯ FAISS: Создаем семантический слепок файла
+        # =======================================================
+        semantic_parts = [
+            ner_extracted.get('title', ''),
+            ner_extracted.get('year', ''),
+            ner_extracted.get('artist', ''),
+            enrich_meta.get('ocr_text', ''),
+        ]
+        # Если IMDb нашел сюжет - добавляем его для поиска!
+        if 'imdb' in enrich_meta:
+            semantic_parts.append(enrich_meta['imdb'].get('plot', ''))
+            
+        semantic_text = " ".join(filter(bool, semantic_parts))
+        
+        # Записываем вектор в FAISS
+        self.vector_db.add_to_index(semantic_text, media.full_path)
+
+        # Сохранение в реляционную БД (SQLite)
         self._save_to_db(media, tech_meta, enrich_meta)
 
     def _save_to_db(self, media: MediaFile, tech: MediaMetadata, enrich: Dict[str, Any]) -> None:
-        """Запись собранной информации в SQLite."""
         cursor = self.conn.cursor()
         title = enrich.get('extracted_title', media.name)
-        
         try:
-            # Запись базовой информации в scanned_files
             cursor.execute('''
                 INSERT OR IGNORE INTO scanned_files (file_name, file_path, size_mb)
                 VALUES (?, ?, ?)
             ''', (title, media.full_path, media.size_mb))
             self.conn.commit()
-            
         except sqlite3.Error as e:
-            logger.error(f"Ошибка записи в БД для {media.name}: {e}")
+            logger.error(f"Ошибка записи в БД: {e}")
 
     def __del__(self):
-        """Безопасное закрытие соединения с БД при уничтожении объекта."""
         if hasattr(self, 'conn'):
             self.conn.close()
 
 if __name__ == "__main__":
-    # Локальный тест пайплайна с использованием настроек из конфига
+    # Тестовый запуск
     settings.test_dir.mkdir(parents=True, exist_ok=True)
     
-    # Создаем фейковый файл для теста
-    test_file = settings.test_dir / 'The.Dark.Knight.2008.1080p.mkv'
-    test_file.write_text('dummy')
+    # Фейковые файлы
+    (settings.test_dir / 'The.Dark.Knight.2008.1080p.mkv').write_text('dummy')
+    (settings.test_dir / 'Interstellar.2014.WEB-DL.mkv').write_text('dummy')
         
     pipeline = MediaPipeline()
     pipeline.process_directory(str(settings.test_dir))
+    
+    # ТЕСТ СЕМАНТИЧЕСКОГО ПОИСКА
+    print("\n" + "="*50)
+    print(" ДЕМОНСТРАЦИЯ ИНТЕЛЛЕКТУАЛЬНОГО ВЕКТОРНОГО ПОИСКА")
+    print("="*50)
+    
+    # Ищем не по названию, а по смысловому описанию!
+    query = "фильм про космос черную дыру и гравитацию"
+    print(f"ЗАПРОС ПОЛЬЗОВАТЕЛЯ: '{query}'\n")
+    
+    results = pipeline.vector_db.search(query, top_k=1)
+    for res in results:
+        print(f"🤖 ИИ нашел файл: {res['file_path']}")
+        print(f"📊 Уверенность (Relevance Score): {res['relevance_score']}")
+    print("="*50 + "\n")
