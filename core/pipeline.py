@@ -64,17 +64,18 @@ class MediaPipeline:
         # 1. Извлечение технических метаданных
         tech_meta: MediaMetadata = self.extractor.extract(media)
         
+        # 2. Семантическое обогащение (IMDb, Shazam, OCR)
         if tech_meta.status == 'error':
-            logger.warning(f"Пропуск обогащения из-за технической ошибки: {media.name}")
+            logger.warning(f"Файл не читается. Пропуск глубокого анализа: {media.name}")
             enrich_meta = {'extracted_title': media.name} 
         else:
-            # 2. Семантическое обогащение (IMDb, Shazam, OCR)
             enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
             
-            # 3. Инференс нашей дообученной NER-нейросети!
-            ner_extracted = self.ner.extract_entities(media.name)
-            enrich_meta['ner_analysis'] = ner_extracted
-            logger.info(f"NER извлек: {ner_extracted}")
+        # 3. Инференс нашей дообученной NER-нейросети!
+        # (Она работает всегда, так как анализирует строку с именем файла)
+        ner_extracted = self.ner.extract_entities(media.name)
+        enrich_meta['ner_analysis'] = ner_extracted
+        logger.info(f"NER извлек: {ner_extracted}")
 
         # 4. Сохранение в базу
         self._save_to_db(media, tech_meta, enrich_meta)
