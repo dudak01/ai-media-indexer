@@ -3,46 +3,41 @@
 Связывает вместе Scanner, Extractor, EnrichmentService и нашу нейросеть NER.
 """
 
-import os
 import sqlite3
 import logging
 from typing import List, Dict, Any
+
+from core.config import settings
 from core.models import MediaFile, MediaMetadata
 from core.scanner import DirectoryScanner
 from core.extractor import TechnicalMetadataExtractor
 from core.enrichment import EnrichmentService
-
-# Устанавливаем пути
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, 'db', 'diploma_system.db')
+from core.ner_predictor import NERPredictor
+from core.exceptions import DatabaseConnectionError
 
 logger = logging.getLogger(__name__)
 
 class MediaPipeline:
     """
     Главный класс обработки. Управляет жизненным циклом данных:
-    Сканирование -> Извлечение технических данных -> Семантическое обогащение -> Сохранение.
+    Сканирование -> Извлечение технических данных -> Обогащение -> NER анализ -> Сохранение.
     """
     
     def __init__(self):
-        logger.info("Инициализация Интеллектуального Ядра v2.0...")
+        logger.info("Инициализация Интеллектуального Ядра v3.0...")
         self.extractor = TechnicalMetadataExtractor()
         self.enricher = EnrichmentService()
+        self.ner = NERPredictor()  # Подключаем наш ИИ-модуль
         self._init_db_connection()
 
     def _init_db_connection(self):
-        """Проверка доступа к базе данных SQLite."""
-        if not os.path.exists(DB_PATH):
-            logger.error(f"БД не найдена по пути: {DB_PATH}. Запустите python db/init_db.py")
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        """Проверка доступа к базе данных SQLite с использованием конфига."""
+        if not settings.db_path.exists():
+            logger.error(f"БД не найдена по пути: {settings.db_path}. Запустите python db/init_db.py")
+        self.conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
 
     def process_directory(self, target_dir: str) -> None:
-        """
-        Полный цикл обработки папки с медиафайлами.
-        
-        Args:
-            target_dir (str): Путь к директории для анализа.
-        """
+        """Полный цикл обработки папки с медиафайлами."""
         scanner = DirectoryScanner(target_dir)
         inventory = scanner.scan()
         
@@ -63,21 +58,25 @@ class MediaPipeline:
         logger.info("Пайплайн завершил работу.")
 
     def _process_single_file(self, media: MediaFile) -> None:
-        """Обработка одного конкретного файла: Экстракция -> Обогащение -> БД."""
+        """Обработка одного файла: Экстракция -> Обогащение -> NER -> БД."""
         logger.info(f"Анализ: {media.name}")
         
-        # 1. Извлечение технических метаданных (FFmpeg / Pillow)
+        # 1. Извлечение технических метаданных
         tech_meta: MediaMetadata = self.extractor.extract(media)
         
-        # Если файл битый, логируем и пропускаем обогащение
         if tech_meta.status == 'error':
             logger.warning(f"Пропуск обогащения из-за технической ошибки: {media.name}")
             enrich_meta = {'extracted_title': media.name} 
         else:
             # 2. Семантическое обогащение (IMDb, Shazam, OCR)
             enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
+            
+            # 3. Инференс нашей дообученной NER-нейросети!
+            ner_extracted = self.ner.extract_entities(media.name)
+            enrich_meta['ner_analysis'] = ner_extracted
+            logger.info(f"NER извлек: {ner_extracted}")
 
-        # 3. Сохранение в базу
+        # 4. Сохранение в базу
         self._save_to_db(media, tech_meta, enrich_meta)
 
     def _save_to_db(self, media: MediaFile, tech: MediaMetadata, enrich: Dict[str, Any]) -> None:
@@ -93,9 +92,6 @@ class MediaPipeline:
             ''', (title, media.full_path, media.size_mb))
             self.conn.commit()
             
-            # В реальном проекте здесь будет логика распределения по таблицам video/audio/image
-            # на основе media.media_type. Пока просто подтверждаем успешную обработку.
-            
         except sqlite3.Error as e:
             logger.error(f"Ошибка записи в БД для {media.name}: {e}")
 
@@ -105,13 +101,12 @@ class MediaPipeline:
             self.conn.close()
 
 if __name__ == "__main__":
-    # Локальный тест пайплайна
-    test_dir = os.path.join(BASE_DIR, 'data', 'test_folder')
-    os.makedirs(test_dir, exist_ok=True)
+    # Локальный тест пайплайна с использованием настроек из конфига
+    settings.test_dir.mkdir(parents=True, exist_ok=True)
     
     # Создаем фейковый файл для теста
-    with open(os.path.join(test_dir, 'Inception.2010.1080p.mkv'), 'w') as f:
-        f.write('dummy')
+    test_file = settings.test_dir / 'The.Dark.Knight.2008.1080p.mkv'
+    test_file.write_text('dummy')
         
     pipeline = MediaPipeline()
-    pipeline.process_directory(test_dir)
+    pipeline.process_directory(str(settings.test_dir))
