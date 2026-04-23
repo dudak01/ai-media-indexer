@@ -53,38 +53,47 @@ class MediaPipeline:
     def _process_single_file(self, media: MediaFile) -> None:
         logger.info(f"Анализ: {media.name}")
         
+        # 1. Технические метаданные
         tech_meta: MediaMetadata = self.extractor.extract(media)
-        
         if tech_meta.status == 'error':
-            logger.warning(f"Файл не читается. Пропуск глубокого анализа: {media.name}")
-            enrich_meta = {'extracted_title': media.name} 
-        else:
-            enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
-            
-        # Инференс NER
-        ner_extracted = self.ner.extract_entities(media.name)
-        enrich_meta['ner_analysis'] = ner_extracted
-        logger.info(f"NER извлек: {ner_extracted}")
+            logger.warning(f"Файл поврежден (ошибка FFmpeg), но семантический анализ будет продолжен!")
 
-        # =======================================================
-        # ИНТЕГРАЦИЯ FAISS: Создаем семантический слепок файла
-        # =======================================================
+        # 2. Инференс NER (Извлекаем чистое название ДО обогащения)
+        ner_extracted = self.ner.extract_entities(media.name)
+        logger.info(f"NER извлек: {ner_extracted}")
+        
+        # 3. Семантическое обогащение
+        enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
+        
+        # КАСКАДНАЯ СВЯЗКА: Берем чистый результат от ИИ и отправляем в IMDb
+        clean_title = ner_extracted.get('title')
+        if media.media_type == 'video' and clean_title:
+            logger.info(f"Запрашиваем сюжет в IMDb для фильма: '{clean_title}'...")
+            imdb_data = self.enricher.enrich_video(clean_title)
+            enrich_meta.update(imdb_data) # Добавляем найденный сюжет
+
+        enrich_meta['ner_analysis'] = ner_extracted
+
+        # 4. ИНТЕГРАЦИЯ FAISS: Создаем семантический слепок файла
         semantic_parts = [
             ner_extracted.get('title', ''),
             ner_extracted.get('year', ''),
             ner_extracted.get('artist', ''),
             enrich_meta.get('ocr_text', ''),
         ]
-        # Если IMDb нашел сюжет - добавляем его для поиска!
-        if 'imdb' in enrich_meta:
-            semantic_parts.append(enrich_meta['imdb'].get('plot', ''))
+        
+        # Если IMDb нашел сюжет - он попадает в Векторную базу!
+        if 'imdb' in enrich_meta and enrich_meta['imdb'].get('plot'):
+            plot = enrich_meta['imdb']['plot']
+            logger.info(f"Добавлен сюжет для FAISS: {plot[:50]}...")
+            semantic_parts.append(plot)
             
         semantic_text = " ".join(filter(bool, semantic_parts))
         
         # Записываем вектор в FAISS
         self.vector_db.add_to_index(semantic_text, media.full_path)
 
-        # Сохранение в реляционную БД (SQLite)
+        # 5. Сохранение в БД
         self._save_to_db(media, tech_meta, enrich_meta)
 
     def _save_to_db(self, media: MediaFile, tech: MediaMetadata, enrich: Dict[str, Any]) -> None:
