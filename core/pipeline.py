@@ -13,7 +13,7 @@ from core.scanner import DirectoryScanner
 from core.extractor import TechnicalMetadataExtractor
 from core.enrichment import EnrichmentService
 from core.ner_predictor import NERPredictor
-from core.vector_db import SemanticSearchEngine
+from core.vector_db import VectorDatabase
 from core.exceptions import DatabaseConnectionError
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class MediaPipeline:
         self.extractor = TechnicalMetadataExtractor()
         self.enricher = EnrichmentService()
         self.ner = NERPredictor()
-        self.vector_db = SemanticSearchEngine()  # Инициализация Векторной БД
+        self.vector_db = VectorDatabase()
         self._init_db_connection()
 
     def _init_db_connection(self):
@@ -58,23 +58,23 @@ class MediaPipeline:
         if tech_meta.status == 'error':
             logger.warning(f"Файл поврежден (ошибка FFmpeg), но семантический анализ будет продолжен!")
 
-        # 2. Инференс NER (Извлекаем чистое название ДО обогащения)
+        # 2. Инференс NER
         ner_extracted = self.ner.extract_entities(media.name)
         logger.info(f"NER извлек: {ner_extracted}")
         
         # 3. Семантическое обогащение
         enrich_meta: Dict[str, Any] = self.enricher.enrich(media.full_path, media.media_type)
         
-        # КАСКАДНАЯ СВЯЗКА: Берем чистый результат от ИИ и отправляем в IMDb
+        # Каскадная связка: чистый результат NER → IMDb
         clean_title = ner_extracted.get('title')
         if media.media_type == 'video' and clean_title:
             logger.info(f"Запрашиваем сюжет в IMDb для фильма: '{clean_title}'...")
             imdb_data = self.enricher.enrich_video(clean_title)
-            enrich_meta.update(imdb_data) # Добавляем найденный сюжет
+            enrich_meta.update(imdb_data)
 
         enrich_meta['ner_analysis'] = ner_extracted
 
-        # 4. ИНТЕГРАЦИЯ FAISS: Создаем семантический слепок файла
+        # 4. FAISS: семантический слепок файла
         semantic_parts = [
             ner_extracted.get('title', ''),
             ner_extracted.get('year', ''),
@@ -82,7 +82,6 @@ class MediaPipeline:
             enrich_meta.get('ocr_text', ''),
         ]
         
-        # Если IMDb нашел сюжет - он попадает в Векторную базу!
         if 'imdb' in enrich_meta and enrich_meta['imdb'].get('plot'):
             plot = enrich_meta['imdb']['plot']
             logger.info(f"Добавлен сюжет для FAISS: {plot[:50]}...")
@@ -90,8 +89,10 @@ class MediaPipeline:
             
         semantic_text = " ".join(filter(bool, semantic_parts))
         
-        # Записываем вектор в FAISS
-        self.vector_db.add_to_index(semantic_text, media.full_path)
+        self.vector_db.add_text(semantic_text, {
+            "file_path": media.full_path,
+            "name": media.name
+        })
 
         # 5. Сохранение в БД
         self._save_to_db(media, tech_meta, enrich_meta)
@@ -113,27 +114,23 @@ class MediaPipeline:
             self.conn.close()
 
 if __name__ == "__main__":
-    # Тестовый запуск
     settings.test_dir.mkdir(parents=True, exist_ok=True)
     
-    # Фейковые файлы
     (settings.test_dir / 'The.Dark.Knight.2008.1080p.mkv').write_text('dummy')
     (settings.test_dir / 'Interstellar.2014.WEB-DL.mkv').write_text('dummy')
         
     pipeline = MediaPipeline()
     pipeline.process_directory(str(settings.test_dir))
     
-    # ТЕСТ СЕМАНТИЧЕСКОГО ПОИСКА
     print("\n" + "="*50)
     print(" ДЕМОНСТРАЦИЯ ИНТЕЛЛЕКТУАЛЬНОГО ВЕКТОРНОГО ПОИСКА")
     print("="*50)
     
-    # Ищем не по названию, а по смысловому описанию!
     query = "фильм про космос черную дыру и гравитацию"
     print(f"ЗАПРОС ПОЛЬЗОВАТЕЛЯ: '{query}'\n")
     
-    results = pipeline.vector_db.search(query, top_k=1)
+    results = pipeline.vector_db.search(query, k=1)
     for res in results:
-        print(f"🤖 ИИ нашел файл: {res['file_path']}")
-        print(f"📊 Уверенность (Relevance Score): {res['relevance_score']}")
+        print(f"ИИ нашел файл: {res['payload'].get('file_path')}")
+        print(f"Уверенность (Score): {res.get('score')}")
     print("="*50 + "\n")

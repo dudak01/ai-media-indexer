@@ -1,7 +1,5 @@
 """
 Модуль семантического обогащения метаданных.
-Использует внешние API и нейросети (Shazam, EasyOCR, IMDb) для извлечения смысла.
-Реализует паттерн Graceful Degradation (Мягкая деградация) при недоступности внешних сервисов.
 """
 
 import logging
@@ -13,8 +11,7 @@ logger = logging.getLogger(__name__)
 class EnrichmentService:
     def __init__(self):
         logger.info("Инициализация EnrichmentService...")
-        
-        # Инициализация IMDb (Cinemagoer)
+
         try:
             from imdb import Cinemagoer
             self.ia = Cinemagoer()
@@ -22,38 +19,33 @@ class EnrichmentService:
             self.ia = None
             logger.warning("Библиотека Cinemagoer (IMDb) не установлена.")
 
-        # Инициализация EasyOCR для картинок
         try:
             import easyocr
-            # Подгружаем модель (gpu=True работает автоматически при наличии CUDA)
             self.reader = easyocr.Reader(['ru', 'en'])
         except ImportError:
             self.reader = None
             logger.warning("Библиотека EasyOCR не установлена.")
 
-        # Инициализация Shazam для аудио
         try:
             from shazamio import Shazam
             self.shazam = Shazam()
         except ImportError:
             self.shazam = None
             logger.warning("Библиотека Shazamio не установлена.")
-            
-        # =======================================================
-        # FALLBACK КЭШ: Резервная база на случай блокировки API
-        # =======================================================
+
         self.local_cache = {
-            "inter stellar": "Фильм про космос, черную дыру, гравитацию и спасение человечества. Бывший пилот Купер отправляется в червоточину.",
-            "the dark knight": "Бэтмен противостоит Джокеру в Готэме. Криминальный триллер про супергероев и бандитов.",
-            "the matrix": "Хакер Нео узнает, что наш мир - это матрица и иллюзия. Киберпанк, искусственный интеллект и виртуальная реальность."
+            "inter stellar": "Фильм про космос, черную дыру, гравитацию и спасение человечества.",
+            "the dark knight": "Бэтмен противостоит Джокеру в Готэме. Криминальный триллер.",
+            "the matrix": "Хакер Нео узнает, что наш мир - это матрица. Киберпанк и ИИ.",
+            "terminator": "Робот-убийца из будущего охотится на человека. Научная фантастика.",
+            "inception": "Команда проникает в сны людей чтобы украсть секреты. Триллер Нолана.",
+            "interstellar": "Фильм про космос, черную дыру, гравитацию и спасение человечества.",
+            "incredibles": "Семья супергероев скрывает свои способности. Мультфильм Pixar.",
         }
 
     def enrich(self, file_path: str, media_type: str) -> Dict[str, Any]:
-        """Определяет тип файла и направляет в нужный метод обогащения."""
         if media_type == 'video':
-            # Для видео мы теперь используем каскад (отдельно вызываем enrich_video по чистому имени),
-            # поэтому здесь возвращаем пустой словарь, чтобы не делать двойную работу.
-            return {} 
+            return {}
         elif media_type == 'audio':
             return self._run_async(self.enrich_audio(file_path))
         elif media_type == 'image':
@@ -61,8 +53,6 @@ class EnrichmentService:
         return {}
 
     def enrich_video(self, title: str) -> Dict[str, Any]:
-        """Обогащение видео через IMDb с Fallback-механизмом."""
-        # 1. Сначала пытаемся честно спросить IMDb
         if self.ia:
             try:
                 movies = self.ia.search_movie(title)
@@ -72,23 +62,30 @@ class EnrichmentService:
                     plot = best_match.get('plot', [''])[0]
                     return {'imdb': {'plot': plot}}
             except Exception as e:
-                logger.warning("API IMDb заблокировал запрос (403) или недоступен. Активация Fallback-кэша...")
+                logger.warning("IMDb недоступен. Активация Fallback-кэша...")
 
-        # 2. Если IMDb упал (или нет интернета), ищем в нашем кэше по смыслу названия
         clean_title_lower = title.lower().strip()
         for key, plot in self.local_cache.items():
-            if key in clean_title_lower:
-                logger.info(f"Сюжет успешно восстановлен из резервного кэша для: '{title}'")
+            if key in clean_title_lower or clean_title_lower in key:
+                logger.info(f"Сюжет из резервного кэша для: '{title}'")
                 return {'imdb': {'plot': plot}}
-                
+
         return {}
 
     def enrich_image(self, file_path: str) -> Dict[str, Any]:
-        """Распознавание текста на изображении с помощью EasyOCR."""
+        """Распознавание текста на изображении через EasyOCR."""
         if not self.reader:
             return {}
         try:
-            results = self.reader.readtext(file_path, detail=0)
+            # Читаем файл через numpy чтобы обойти проблему кириллицы в пути (Windows)
+            import numpy as np
+            img_array = np.fromfile(file_path, dtype=np.uint8)
+            import cv2
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if img is None:
+                logger.warning(f"Не удалось декодировать изображение: {file_path}")
+                return {}
+            results = self.reader.readtext(img, detail=0)
             text = " ".join(results)
             return {'ocr_text': text} if text else {}
         except Exception as e:
@@ -96,7 +93,6 @@ class EnrichmentService:
             return {}
 
     async def enrich_audio(self, file_path: str) -> Dict[str, Any]:
-        """Распознавание музыки через Shazam API."""
         if not self.shazam:
             return {}
         try:
@@ -112,11 +108,9 @@ class EnrichmentService:
         return {}
 
     def _run_async(self, coro) -> Dict[str, Any]:
-        """Утилита для запуска асинхронных функций (Shazam) в синхронном коде пайплайна."""
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
         return loop.run_until_complete(coro)

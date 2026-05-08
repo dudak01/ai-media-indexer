@@ -24,9 +24,46 @@ class MediaRepository:
         self._ensure_db_exists()
 
     def _ensure_db_exists(self):
-        """Проверка доступности файла базы данных."""
+        """Проверка доступности файла базы данных и инициализация базовых таблиц."""
         if not self.db_path.parent.exists():
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            
+        # --- ДОБАВЛЕНО ТОЛЬКО ЭТО: Авто-создание таблиц для краш-теста ---
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scanned_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT UNIQUE, file_name TEXT, file_extension TEXT, 
+                    file_size_mb REAL, discovered_at TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ner_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER,
+                    original_text TEXT, extracted_title TEXT, extracted_year TEXT, 
+                    extracted_quality TEXT, confidence_score REAL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS media_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER,
+                    duration_seconds REAL, bit_rate INTEGER, width INTEGER, 
+                    height INTEGER, video_codec TEXT, audio_codec TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ml_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, operation_type TEXT,
+                    model_name TEXT, status TEXT, execution_time_ms REAL, details TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS error_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT
+                )
+            """)
+        # -----------------------------------------------------------------
+
         if not self.db_path.exists():
             logger.warning(f"База данных не найдена по пути {self.db_path}. Требуется запуск init_db.py")
 
