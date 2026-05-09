@@ -10,7 +10,7 @@
 Год:    2026
 
 Описание:
-    Тестовый набор представляет собой набор реальных имён медиафайлов
+    Тестовый набор представляет собой 52 реальных имени медиафайлов
     в форматах, типичных для пользовательских коллекций (раздачи
     P2P-сетей, локальные библиотеки, сохранения с различных
     источников). В отличие от синтетического теста train_test_split,
@@ -20,20 +20,18 @@
         - различные шаблоны именования с разделителями и расширениями;
         - граничные случаи (короткие, нестандартные имена).
 
-    Методика оценки:
-        1. Каждое имя файла проходит препроцессинг по той же логике,
-           что и в core/ner_predictor.py (удаление расширения,
-           замена '.', '_', '-' на пробелы).
-        2. Модель применяется к получившейся строке.
-        3. Предсказания сравниваются с эталонной разметкой
-           на уровне токенов (token-level) и на уровне примеров
-           целиком (exact match).
+    Скрипт поддерживает оценку обеих версий модели:
+        python tests/test_on_real_data.py             (по умолчанию v1)
+        python tests/test_on_real_data.py --model v1  (явно v1)
+        python tests/test_on_real_data.py --model v2  (мультиязычная)
 
-    Результат сохраняется в ml/metrics_v1_real_world.json и
-    предназначен для сравнения с метриками модели v2 (Этап 3).
+    Это позволяет сравнить v1 и v2 на одном и том же реалистичном
+    наборе и зафиксировать улучшение в соответствии с
+    методологическим требованием №15 методички.
 =============================================================================
 """
 
+import argparse
 import json
 import re
 import sys
@@ -46,25 +44,43 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     confusion_matrix,
 )
+from transformers import DistilBertTokenizerFast, DistilBertForTokenClassification
 
-# Подключаем корень проекта для импорта core/
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.ner_predictor import NERPredictor, LABELS, ID2LABEL
+LABELS = ["O", "B-TITLE", "I-TITLE", "B-YEAR", "I-YEAR",
+          "B-QUALITY", "I-QUALITY", "B-ARTIST", "I-ARTIST"]
+ID2LABEL = {i: label for i, label in enumerate(LABELS)}
+
+
+# =========================================================================
+# КОНФИГУРАЦИЯ ВЕРСИЙ МОДЕЛИ
+# =========================================================================
+
+MODEL_VERSIONS = {
+    "v1": {
+        "base_model": "distilbert-base-uncased",
+        "weights_path": ROOT_DIR / "ml" / "weights" / "model.pt",
+        "output_path": ROOT_DIR / "ml" / "metrics_v1_real_world.json",
+        "label": "v1_baseline_en",
+    },
+    "v2": {
+        "base_model": "distilbert-base-multilingual-cased",
+        "weights_path": ROOT_DIR / "ml" / "weights" / "model2.pt",
+        "output_path": ROOT_DIR / "ml" / "metrics_v2_real_world.json",
+        "label": "v2_multilingual_cased",
+    },
+}
 
 
 # =========================================================================
 # РЕАЛИСТИЧНЫЙ TEST SET
 # =========================================================================
-# Формат: (raw_filename, list_of_tags_after_preprocessing)
-# Эталонные теги выровнены по словам ПОСЛЕ препроцессинга.
 
 REAL_WORLD_TEST_SET = [
-
-    # --- АНГЛОЯЗЫЧНЫЕ ФИЛЬМЫ (классические rip'ы P2P-сообществ) ---
-
+    # --- АНГЛОЯЗЫЧНЫЕ ФИЛЬМЫ ---
     ("The.Wolf.of.Wall.Street.2013.1080p.BluRay.x264-AMIABLE.mkv",
      ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
       "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
@@ -107,7 +123,6 @@ REAL_WORLD_TEST_SET = [
      ["B-TITLE", "I-TITLE", "B-YEAR",
       "B-QUALITY", "I-QUALITY", "I-QUALITY", "I-QUALITY"]),
 
-    # Знакомые модели названия (для контроля что не "забыла")
     ("Inception.2010.1080p.BluRay.x264.mkv",
      ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY"]),
 
@@ -119,7 +134,6 @@ REAL_WORLD_TEST_SET = [
      ["B-TITLE", "B-YEAR"]),
 
     # --- РУССКИЕ ФИЛЬМЫ КИРИЛЛИЦЕЙ ---
-
     ("Брат.1997.DVDRip.avi",
      ["B-TITLE", "B-YEAR", "B-QUALITY"]),
 
@@ -152,7 +166,6 @@ REAL_WORLD_TEST_SET = [
      ["B-TITLE", "B-YEAR", "B-QUALITY"]),
 
     # --- РУССКИЕ ФИЛЬМЫ ТРАНСЛИТОМ ---
-
     ("Brat.1997.DVDRip.avi",
      ["B-TITLE", "B-YEAR", "B-QUALITY"]),
 
@@ -169,7 +182,6 @@ REAL_WORLD_TEST_SET = [
      ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
 
     # --- АНГЛОЯЗЫЧНАЯ МУЗЫКА ---
-
     ("Bjork - Hyperballad - 320kbps.mp3",
      ["B-ARTIST", "B-TITLE", "B-QUALITY"]),
 
@@ -187,7 +199,6 @@ REAL_WORLD_TEST_SET = [
      ["B-ARTIST", "I-ARTIST", "I-ARTIST", "I-ARTIST",
       "B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-QUALITY"]),
 
-    # Знакомые модели имена
     ("Queen - Bohemian Rhapsody.flac",
      ["B-ARTIST", "B-TITLE", "I-TITLE"]),
 
@@ -198,7 +209,6 @@ REAL_WORLD_TEST_SET = [
      ["B-ARTIST", "B-TITLE", "I-TITLE", "B-QUALITY"]),
 
     # --- РУССКАЯ МУЗЫКА КИРИЛЛИЦЕЙ ---
-
     ("Кино - Группа крови.flac",
      ["B-ARTIST", "B-TITLE", "I-TITLE"]),
 
@@ -215,7 +225,6 @@ REAL_WORLD_TEST_SET = [
      ["B-ARTIST", "B-TITLE", "I-TITLE"]),
 
     # --- СЕРИАЛЫ ---
-
     ("Breaking.Bad.S03E07.1080p.BluRay.x264-DEMAND.mkv",
      ["B-TITLE", "I-TITLE", "O",
       "B-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
@@ -231,7 +240,6 @@ REAL_WORLD_TEST_SET = [
      ["B-TITLE", "I-TITLE", "O", "B-QUALITY", "O"]),
 
     # --- EDGE CASES ---
-
     ("IMG_20240515_142233.jpg",
      ["O", "O", "O"]),
 
@@ -246,19 +254,18 @@ REAL_WORLD_TEST_SET = [
 
     ("2024_отпуск.mp4",
      ["B-YEAR", "O"]),
-
 ]
 
 
 # =========================================================================
-# ПРЕПРОЦЕССИНГ (синхронно с core/ner_predictor.py)
+# ПРЕПРОЦЕССИНГ
 # =========================================================================
 
 def preprocess_filename(text: str) -> str:
     """
     Применяет ту же последовательность преобразований, что и
     NERPredictor.extract_entities() в core/ner_predictor.py:
-        1. Удаление расширения файла (последняя точка + 2-4 буквы/цифры)
+        1. Удаление расширения файла (последняя точка + 2-4 символа)
         2. Замена разделителей '.', '_', '-' на пробелы
         3. Схлопывание последовательных пробелов
     """
@@ -269,23 +276,53 @@ def preprocess_filename(text: str) -> str:
 
 
 # =========================================================================
+# ЗАГРУЗКА МОДЕЛИ ВЫБРАННОЙ ВЕРСИИ
+# =========================================================================
+
+def load_model(version: str):
+    """
+    Загружает базовую DistilBERT-модель указанной версии (v1 или v2)
+    и подгружает дообученные веса. Возвращает (tokenizer, model, device).
+    """
+    config = MODEL_VERSIONS[version]
+    base_model = config["base_model"]
+    weights_path = config["weights_path"]
+
+    if not weights_path.exists():
+        raise FileNotFoundError(
+            f"Файл весов не найден: {weights_path}\n"
+            f"Сначала обучите модель {version} соответствующим train-скриптом."
+        )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    tokenizer = DistilBertTokenizerFast.from_pretrained(base_model)
+    model = DistilBertForTokenClassification.from_pretrained(
+        base_model,
+        num_labels=len(LABELS),
+    ).to(device)
+
+    state_dict = torch.load(weights_path, map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    return tokenizer, model, device
+
+
+# =========================================================================
 # ИНФЕРЕНС НА УРОВНЕ СЛОВ
 # =========================================================================
 
-def predict_word_tags(ner: NERPredictor, text: str):
+def predict_word_tags(tokenizer, model, device, text: str):
     """
     Применяет модель к строке и возвращает список IOB-меток
-    на уровне слов (одна метка на слово после text.split()).
-
-    Для каждого слова берётся метка ПЕРВОГО subtoken'a — стандартный
-    приём при оценке token-level NER (alternative — голосование по
-    subtoken'ам, но для упрощения используем стандартный подход).
+    на уровне слов. Для каждого слова берётся метка ПЕРВОГО subtoken'a.
     """
     words = text.split()
     if not words:
         return []
 
-    encoding = ner.tokenizer(
+    encoding = tokenizer(
         words,
         is_split_into_words=True,
         return_tensors="pt",
@@ -295,10 +332,10 @@ def predict_word_tags(ner: NERPredictor, text: str):
         return_offsets_mapping=False,
     )
     word_ids = encoding.word_ids()
-    inputs = {k: v.to(ner.device) for k, v in encoding.items()}
+    inputs = {k: v.to(device) for k, v in encoding.items()}
 
     with torch.no_grad():
-        logits = ner.model(**inputs).logits
+        logits = model(**inputs).logits
         preds = torch.argmax(logits, dim=2).squeeze().tolist()
 
     word_to_pred = {}
@@ -315,7 +352,7 @@ def predict_word_tags(ner: NERPredictor, text: str):
 
 def validate_test_set():
     """Проверяет, что для каждого примера длина words после preprocess
-    совпадает с длиной разметки. Иначе тест невозможен."""
+    совпадает с длиной разметки."""
     errors = []
     for filename, tags in REAL_WORLD_TEST_SET:
         clean = preprocess_filename(filename)
@@ -338,21 +375,28 @@ def validate_test_set():
 # ОСНОВНАЯ ОЦЕНКА
 # =========================================================================
 
-def evaluate_on_real_data():
+def evaluate_on_real_data(version: str):
+    config = MODEL_VERSIONS[version]
+
     print("=" * 70)
-    print("Оценка NER-модели на реалистичном тестовом наборе")
+    print(f"Оценка NER-модели {version} ({config['label']}) на реалистичном тесте")
     print("=" * 70)
 
     if not validate_test_set():
         print("\n[FAIL] Test set содержит ошибки разметки. Прерываю.")
         return
 
-    print(f"\n[1] Загрузка модели...")
-    ner = NERPredictor()
-    if ner.model is None:
-        print("[FAIL] Модель не загружена. Проверьте ml/weights/model.pt")
+    print(f"\n[1] Загрузка модели {version}...")
+    print(f"    Базовая модель: {config['base_model']}")
+    print(f"    Веса:           {config['weights_path']}")
+
+    try:
+        tokenizer, model, device = load_model(version)
+    except FileNotFoundError as e:
+        print(f"\n[FAIL] {e}")
         return
-    print(f"    Устройство: {ner.device}")
+
+    print(f"    Устройство:     {device}")
     print(f"    Загружено: {len(REAL_WORLD_TEST_SET)} реалистичных примеров")
 
     all_true_label_ids = []
@@ -364,7 +408,7 @@ def evaluate_on_real_data():
     print(f"\n[2] Прогон инференса...")
     for filename, true_tags in REAL_WORLD_TEST_SET:
         clean_text = preprocess_filename(filename)
-        pred_tags = predict_word_tags(ner, clean_text)
+        pred_tags = predict_word_tags(tokenizer, model, device, clean_text)
 
         true_ids = [LABELS.index(t) if t in LABELS else 0 for t in true_tags]
         pred_ids = [LABELS.index(t) if t in LABELS else 0 for t in pred_tags]
@@ -382,7 +426,6 @@ def evaluate_on_real_data():
                 "pred": pred_tags,
             })
 
-    # ----- Метрики -----
     accuracy = accuracy_score(all_true_label_ids, all_pred_label_ids)
     p_w, r_w, f1_w, _ = precision_recall_fscore_support(
         all_true_label_ids, all_pred_label_ids,
@@ -399,9 +442,9 @@ def evaluate_on_real_data():
 
     exact_match_ratio = exact_match_count / len(REAL_WORLD_TEST_SET)
 
-    # ----- Вывод результатов -----
     print(f"\n[3] Результаты")
     print("-" * 70)
+    print(f"Версия модели:           {config['label']}")
     print(f"Всего примеров:          {len(REAL_WORLD_TEST_SET)}")
     print(f"Точные совпадения:       {exact_match_count} / {len(REAL_WORLD_TEST_SET)} "
           f"({exact_match_ratio:.2%})")
@@ -414,20 +457,19 @@ def evaluate_on_real_data():
     print(f"Recall    (macro):       {r_m:.4f}")
     print(f"F1-score  (macro):       {f1_m:.4f}")
 
-    # ----- Примеры ошибок -----
     if error_log:
         print(f"\n[4] Примеры ошибок (показаны первые 10):")
         print("-" * 70)
         for err in error_log[:10]:
-            print(f"  Файл:        {err['filename']}")
+            print(f"  Файл:             {err['filename']}")
             print(f"  После preprocess: {err['preprocessed']}")
-            print(f"  Эталон:      {err['true']}")
-            print(f"  Предсказание: {err['pred']}")
+            print(f"  Эталон:           {err['true']}")
+            print(f"  Предсказание:     {err['pred']}")
             print()
 
-    # ----- Сохранение результатов -----
     output = {
-        "model_version": "v1_baseline_en",
+        "model_version": config["label"],
+        "base_model": config["base_model"],
         "test_set_type": "real_world",
         "test_set_size": len(REAL_WORLD_TEST_SET),
         "exact_match_count": exact_match_count,
@@ -446,12 +488,27 @@ def evaluate_on_real_data():
         "errors": error_log,
     }
 
-    output_path = ROOT_DIR / "ml" / "metrics_v1_real_world.json"
+    output_path = config["output_path"]
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
     print(f"\n[5] Результаты сохранены: {output_path}")
     print("=" * 70)
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Оценка NER-модели на реалистичном тестовом наборе"
+    )
+    parser.add_argument(
+        "--model",
+        choices=["v1", "v2"],
+        default="v1",
+        help="Версия модели для оценки (v1 — baseline; v2 — multilingual). "
+             "По умолчанию: v1.",
+    )
+    args = parser.parse_args()
+    evaluate_on_real_data(args.model)
+
+
 if __name__ == "__main__":
-    evaluate_on_real_data()
+    main()

@@ -5,6 +5,6 @@ ml/cache/
 data/test_folder/
 # Локальные базы данных (генерируются автоматически)
 db/*.db
-
 # Тестовая папка с медиафайлами (генерируется автоматически)
 tests/edge_cases/
+ml/weights/model2.ptml/weights/model2.pt 

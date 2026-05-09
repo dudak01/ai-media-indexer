@@ -1,36 +1,36 @@
 {
-  "model_version": "v1_baseline_en",
-  "base_model": "distilbert-base-uncased",
+  "model_version": "v2_multilingual_cased",
+  "base_model": "distilbert-base-multilingual-cased",
   "test_set_type": "real_world",
   "test_set_size": 52,
   "exact_match_count": 34,
   "exact_match_ratio": 0.6538461538461539,
   "token_level_metrics": {
-    "accuracy": 0.90625,
-    "precision_weighted": 0.9143481293229695,
-    "recall_weighted": 0.90625,
-    "f1_weighted": 0.9024489626922081,
-    "precision_macro": 0.9341411971876874,
-    "recall_macro": 0.844114808611268,
-    "f1_macro": 0.8740487199641623
+    "accuracy": 0.9140625,
+    "precision_weighted": 0.9199724748770476,
+    "recall_weighted": 0.9140625,
+    "f1_weighted": 0.9101114738126457,
+    "precision_macro": 0.939049727646721,
+    "recall_macro": 0.8554920828428035,
+    "f1_macro": 0.8834620642502848
   },
   "confusion_matrix": [
     [
       14,
-      3,
+      1,
       0,
+      1,
+      0,
+      1,
+      5,
+      0,
+      0
+    ],
+    [
+      0,
+      45,
       2,
       0,
-      1,
-      2,
-      0,
-      0
-    ],
-    [
-      0,
-      47,
-      0,
-      0,
       0,
       0,
       0,
@@ -39,19 +39,19 @@
     ],
     [
       0,
-      1,
-      60,
+      0,
+      62,
       0,
       0,
-      1,
+      0,
       0,
       0,
       0
     ],
     [
       0,
-      1,
       0,
+      1,
       30,
       0,
       0,
@@ -76,8 +76,8 @@
       0,
       0,
       0,
-      40,
-      1,
+      41,
+      0,
       0,
       0
     ],
@@ -94,13 +94,13 @@
     ],
     [
       0,
-      2,
+      1,
       0,
       0,
       0,
       0,
       0,
-      11,
+      12,
       0
     ],
     [
@@ -128,14 +128,10 @@
   ],
   "errors": [
     {
-      "filename": "The.Wolf.of.Wall.Street.2013.1080p.BluRay.x264-AMIABLE.mkv",
-      "preprocessed": "The Wolf of Wall Street 2013 1080p BluRay x264 AMIABLE",
+      "filename": "Trainspotting.1996.1080p.BluRay.x264-CtrlHD.mkv",
+      "preprocessed": "Trainspotting 1996 1080p BluRay x264 CtrlHD",
       "true": [
         "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
         "B-YEAR",
         "B-QUALITY",
         "I-QUALITY",
@@ -144,65 +140,37 @@
       ],
       "pred": [
         "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
         "B-YEAR",
         "B-QUALITY",
         "I-QUALITY",
         "I-QUALITY",
-        "B-TITLE"
+        "I-QUALITY"
       ]
     },
     {
-      "filename": "Eternal.Sunshine.of.the.Spotless.Mind.2004.720p.BluRay-YTS.mkv",
-      "preprocessed": "Eternal Sunshine of the Spotless Mind 2004 720p BluRay YTS",
+      "filename": "No.Country.for.Old.Men.2007.2160p.UHD.BluRay.HEVC.mkv",
+      "preprocessed": "No Country for Old Men 2007 2160p UHD BluRay HEVC",
       "true": [
         "B-TITLE",
         "I-TITLE",
         "I-TITLE",
         "I-TITLE",
         "I-TITLE",
-        "I-TITLE",
         "B-YEAR",
         "B-QUALITY",
-        "I-QUALITY",
-        "O"
-      ],
-      "pred": [
-        "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "B-QUALITY",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "I-QUALITY",
-        "O"
-      ]
-    },
-    {
-      "filename": "There.Will.Be.Blood.2007.1080p.WEB-DL.mp4",
-      "preprocessed": "There Will Be Blood 2007 1080p WEB DL",
-      "true": [
-        "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
+        "O",
         "I-QUALITY",
         "I-QUALITY"
       ],
       "pred": [
         "B-TITLE",
-        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
         "I-TITLE",
         "I-TITLE",
         "B-YEAR",
         "B-QUALITY",
+        "I-QUALITY",
         "I-QUALITY",
         "I-QUALITY"
       ]
@@ -268,6 +236,28 @@
       ]
     },
     {
+      "filename": "The.Matrix.1999.4K.UHD.BluRay.HEVC.mkv",
+      "preprocessed": "The Matrix 1999 4K UHD BluRay HEVC",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "O",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
       "filename": "Interstellar (2014).mkv",
       "preprocessed": "Interstellar (2014)",
       "true": [
@@ -276,7 +266,7 @@
       ],
       "pred": [
         "B-TITLE",
-        "B-TITLE"
+        "I-TITLE"
       ]
     },
     {
@@ -361,7 +351,7 @@
       ],
       "pred": [
         "B-TITLE",
-        "B-TITLE",
+        "I-TITLE",
         "B-QUALITY"
       ]
     },
@@ -380,11 +370,11 @@
         "B-QUALITY"
       ],
       "pred": [
-        "B-TITLE",
+        "B-ARTIST",
         "I-TITLE",
         "I-TITLE",
         "I-TITLE",
-        "B-TITLE",
+        "I-TITLE",
         "I-TITLE",
         "I-TITLE",
         "I-TITLE",
@@ -406,7 +396,7 @@
         "B-TITLE",
         "I-TITLE",
         "O",
-        "I-QUALITY",
+        "B-QUALITY",
         "I-QUALITY",
         "B-QUALITY"
       ]
@@ -438,9 +428,9 @@
         "O"
       ],
       "pred": [
-        "B-TITLE",
+        "O",
         "B-YEAR",
-        "B-YEAR"
+        "O"
       ]
     },
     {
