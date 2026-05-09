@@ -1,0 +1,457 @@
+"""
+=============================================================================
+Оценка NER-модели на реалистичном тестовом наборе.
+
+Тема ВКР: «Индексация медиаконтента и обогащение метаданных
+           с использованием интеллектуального анализа данных»
+
+Автор:  Феденко Никита Александрович
+Группа: ИД 23.1/Б3-22
+Год:    2026
+
+Описание:
+    Тестовый набор представляет собой набор реальных имён медиафайлов
+    в форматах, типичных для пользовательских коллекций (раздачи
+    P2P-сетей, локальные библиотеки, сохранения с различных
+    источников). В отличие от синтетического теста train_test_split,
+    этот набор содержит:
+        - названия, не встречавшиеся в обучающем датасете;
+        - реальные кириллические названия;
+        - различные шаблоны именования с разделителями и расширениями;
+        - граничные случаи (короткие, нестандартные имена).
+
+    Методика оценки:
+        1. Каждое имя файла проходит препроцессинг по той же логике,
+           что и в core/ner_predictor.py (удаление расширения,
+           замена '.', '_', '-' на пробелы).
+        2. Модель применяется к получившейся строке.
+        3. Предсказания сравниваются с эталонной разметкой
+           на уровне токенов (token-level) и на уровне примеров
+           целиком (exact match).
+
+    Результат сохраняется в ml/metrics_v1_real_world.json и
+    предназначен для сравнения с метриками модели v2 (Этап 3).
+=============================================================================
+"""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_fscore_support,
+    confusion_matrix,
+)
+
+# Подключаем корень проекта для импорта core/
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from core.ner_predictor import NERPredictor, LABELS, ID2LABEL
+
+
+# =========================================================================
+# РЕАЛИСТИЧНЫЙ TEST SET
+# =========================================================================
+# Формат: (raw_filename, list_of_tags_after_preprocessing)
+# Эталонные теги выровнены по словам ПОСЛЕ препроцессинга.
+
+REAL_WORLD_TEST_SET = [
+
+    # --- АНГЛОЯЗЫЧНЫЕ ФИЛЬМЫ (классические rip'ы P2P-сообществ) ---
+
+    ("The.Wolf.of.Wall.Street.2013.1080p.BluRay.x264-AMIABLE.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
+
+    ("Trainspotting.1996.1080p.BluRay.x264-CtrlHD.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
+
+    ("Eternal.Sunshine.of.the.Spotless.Mind.2004.720p.BluRay-YTS.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "I-QUALITY", "O"]),
+
+    ("Lost.in.Translation.2003.BDRip.XviD.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("There.Will.Be.Blood.2007.1080p.WEB-DL.mp4",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY"]),
+
+    ("No.Country.for.Old.Men.2007.2160p.UHD.BluRay.HEVC.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "O", "I-QUALITY", "I-QUALITY"]),
+
+    ("Drive.2011.1080p.BluRay.DTS.x264-EbP.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "O", "I-QUALITY", "O"]),
+
+    ("Whiplash 2014 1080p BluRay YTS.mp4",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "O"]),
+
+    ("Sicario_2015_BDRip_1080p.avi",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("The Grand Budapest Hotel.2014.4K.HEVC.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Shutter Island 2010 720p HDRip.mp4",
+     ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Gone.Girl.2014.WEB-DL.1080p.x265.mkv",
+     ["B-TITLE", "I-TITLE", "B-YEAR",
+      "B-QUALITY", "I-QUALITY", "I-QUALITY", "I-QUALITY"]),
+
+    # Знакомые модели названия (для контроля что не "забыла")
+    ("Inception.2010.1080p.BluRay.x264.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY"]),
+
+    ("The.Matrix.1999.4K.UHD.BluRay.HEVC.mkv",
+     ["B-TITLE", "I-TITLE", "B-YEAR",
+      "B-QUALITY", "O", "I-QUALITY", "I-QUALITY"]),
+
+    ("Interstellar (2014).mkv",
+     ["B-TITLE", "B-YEAR"]),
+
+    # --- РУССКИЕ ФИЛЬМЫ КИРИЛЛИЦЕЙ ---
+
+    ("Брат.1997.DVDRip.avi",
+     ["B-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Москва.слезам.не.верит.1980.HDTV.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Иван.Васильевич.меняет.профессию.1973.BDRip.1080p.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
+      "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Бриллиантовая рука 1968 720p.mp4",
+     ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Чебурашка.2023.WEB-DL.1080p.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY"]),
+
+    ("Левиафан-2014-BluRay-1080p.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Высоцкий_Спасибо_что_живой_2011_HDRip.avi",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Ирония судьбы.1975.DVDRip.avi",
+     ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Слово пацана 2023 1080p.mkv",
+     ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Текст 2019 BDRip.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    # --- РУССКИЕ ФИЛЬМЫ ТРАНСЛИТОМ ---
+
+    ("Brat.1997.DVDRip.avi",
+     ["B-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Moskva.Slezam.Ne.Verit.1980.HDTV.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    ("Levafan.2014.BluRay.1080p.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Stalingrad-2013-1080p-BDRip.mkv",
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY"]),
+
+    ("Ironia_Sudby_1975_DVDRip.avi",
+     ["B-TITLE", "I-TITLE", "B-YEAR", "B-QUALITY"]),
+
+    # --- АНГЛОЯЗЫЧНАЯ МУЗЫКА ---
+
+    ("Bjork - Hyperballad - 320kbps.mp3",
+     ["B-ARTIST", "B-TITLE", "B-QUALITY"]),
+
+    ("Tool - Lateralus - FLAC.flac",
+     ["B-ARTIST", "B-TITLE", "B-QUALITY"]),
+
+    ("Arctic_Monkeys_-_Do_I_Wanna_Know_-_Lossless.flac",
+     ["B-ARTIST", "I-ARTIST", "B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-QUALITY"]),
+
+    ("Tame Impala - The Less I Know The Better.mp3",
+     ["B-ARTIST", "I-ARTIST", "B-TITLE", "I-TITLE", "I-TITLE",
+      "I-TITLE", "I-TITLE", "I-TITLE"]),
+
+    ("Rage.Against.the.Machine - Killing.in.the.Name - 320.mp3",
+     ["B-ARTIST", "I-ARTIST", "I-ARTIST", "I-ARTIST",
+      "B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "B-QUALITY"]),
+
+    # Знакомые модели имена
+    ("Queen - Bohemian Rhapsody.flac",
+     ["B-ARTIST", "B-TITLE", "I-TITLE"]),
+
+    ("Pink Floyd - Time - FLAC.flac",
+     ["B-ARTIST", "I-ARTIST", "B-TITLE", "B-QUALITY"]),
+
+    ("Eminem - Lose Yourself - 320kbps.mp3",
+     ["B-ARTIST", "B-TITLE", "I-TITLE", "B-QUALITY"]),
+
+    # --- РУССКАЯ МУЗЫКА КИРИЛЛИЦЕЙ ---
+
+    ("Кино - Группа крови.flac",
+     ["B-ARTIST", "B-TITLE", "I-TITLE"]),
+
+    ("ДДТ - Что такое осень.mp3",
+     ["B-ARTIST", "B-TITLE", "I-TITLE", "I-TITLE"]),
+
+    ("Земфира - Хочешь - Lossless.flac",
+     ["B-ARTIST", "B-TITLE", "B-QUALITY"]),
+
+    ("Сектор Газа - Лирика - 320kbps.mp3",
+     ["B-ARTIST", "I-ARTIST", "B-TITLE", "B-QUALITY"]),
+
+    ("Хабиб - Ягода Малинка.mp3",
+     ["B-ARTIST", "B-TITLE", "I-TITLE"]),
+
+    # --- СЕРИАЛЫ ---
+
+    ("Breaking.Bad.S03E07.1080p.BluRay.x264-DEMAND.mkv",
+     ["B-TITLE", "I-TITLE", "O",
+      "B-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
+
+    ("Stranger.Things.S04E01.WEB-DL.1080p.mkv",
+     ["B-TITLE", "I-TITLE", "O",
+      "B-QUALITY", "I-QUALITY", "I-QUALITY"]),
+
+    ("Game of Thrones S01E09 1080p.mkv",
+     ["B-TITLE", "I-TITLE", "I-TITLE", "O", "B-QUALITY"]),
+
+    ("The Witcher S02E03 4K HDR.mkv",
+     ["B-TITLE", "I-TITLE", "O", "B-QUALITY", "O"]),
+
+    # --- EDGE CASES ---
+
+    ("IMG_20240515_142233.jpg",
+     ["O", "O", "O"]),
+
+    ("video_001.mp4",
+     ["O", "O"]),
+
+    ("DSC02145.JPG",
+     ["O"]),
+
+    ("untitled.mp3",
+     ["O"]),
+
+    ("2024_отпуск.mp4",
+     ["B-YEAR", "O"]),
+
+]
+
+
+# =========================================================================
+# ПРЕПРОЦЕССИНГ (синхронно с core/ner_predictor.py)
+# =========================================================================
+
+def preprocess_filename(text: str) -> str:
+    """
+    Применяет ту же последовательность преобразований, что и
+    NERPredictor.extract_entities() в core/ner_predictor.py:
+        1. Удаление расширения файла (последняя точка + 2-4 буквы/цифры)
+        2. Замена разделителей '.', '_', '-' на пробелы
+        3. Схлопывание последовательных пробелов
+    """
+    clean_text = re.sub(r"\.[a-zA-Z0-9]{2,4}$", "", text)
+    clean_text = clean_text.replace(".", " ").replace("_", " ").replace("-", " ")
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    return clean_text
+
+
+# =========================================================================
+# ИНФЕРЕНС НА УРОВНЕ СЛОВ
+# =========================================================================
+
+def predict_word_tags(ner: NERPredictor, text: str):
+    """
+    Применяет модель к строке и возвращает список IOB-меток
+    на уровне слов (одна метка на слово после text.split()).
+
+    Для каждого слова берётся метка ПЕРВОГО subtoken'a — стандартный
+    приём при оценке token-level NER (alternative — голосование по
+    subtoken'ам, но для упрощения используем стандартный подход).
+    """
+    words = text.split()
+    if not words:
+        return []
+
+    encoding = ner.tokenizer(
+        words,
+        is_split_into_words=True,
+        return_tensors="pt",
+        truncation=True,
+        padding="max_length",
+        max_length=64,
+        return_offsets_mapping=False,
+    )
+    word_ids = encoding.word_ids()
+    inputs = {k: v.to(ner.device) for k, v in encoding.items()}
+
+    with torch.no_grad():
+        logits = ner.model(**inputs).logits
+        preds = torch.argmax(logits, dim=2).squeeze().tolist()
+
+    word_to_pred = {}
+    for tok_idx, word_idx in enumerate(word_ids):
+        if word_idx is not None and word_idx not in word_to_pred:
+            word_to_pred[word_idx] = preds[tok_idx]
+
+    return [ID2LABEL[word_to_pred.get(i, 0)] for i in range(len(words))]
+
+
+# =========================================================================
+# ВАЛИДАЦИЯ TEST SET
+# =========================================================================
+
+def validate_test_set():
+    """Проверяет, что для каждого примера длина words после preprocess
+    совпадает с длиной разметки. Иначе тест невозможен."""
+    errors = []
+    for filename, tags in REAL_WORLD_TEST_SET:
+        clean = preprocess_filename(filename)
+        words = clean.split()
+        if len(words) != len(tags):
+            errors.append(
+                f"  '{filename}'\n"
+                f"    после preprocess: {words} (длина {len(words)})\n"
+                f"    разметка: длина {len(tags)}"
+            )
+    if errors:
+        print("Ошибки в test set:")
+        for e in errors:
+            print(e)
+        return False
+    return True
+
+
+# =========================================================================
+# ОСНОВНАЯ ОЦЕНКА
+# =========================================================================
+
+def evaluate_on_real_data():
+    print("=" * 70)
+    print("Оценка NER-модели на реалистичном тестовом наборе")
+    print("=" * 70)
+
+    if not validate_test_set():
+        print("\n[FAIL] Test set содержит ошибки разметки. Прерываю.")
+        return
+
+    print(f"\n[1] Загрузка модели...")
+    ner = NERPredictor()
+    if ner.model is None:
+        print("[FAIL] Модель не загружена. Проверьте ml/weights/model.pt")
+        return
+    print(f"    Устройство: {ner.device}")
+    print(f"    Загружено: {len(REAL_WORLD_TEST_SET)} реалистичных примеров")
+
+    all_true_label_ids = []
+    all_pred_label_ids = []
+
+    exact_match_count = 0
+    error_log = []
+
+    print(f"\n[2] Прогон инференса...")
+    for filename, true_tags in REAL_WORLD_TEST_SET:
+        clean_text = preprocess_filename(filename)
+        pred_tags = predict_word_tags(ner, clean_text)
+
+        true_ids = [LABELS.index(t) if t in LABELS else 0 for t in true_tags]
+        pred_ids = [LABELS.index(t) if t in LABELS else 0 for t in pred_tags]
+
+        all_true_label_ids.extend(true_ids)
+        all_pred_label_ids.extend(pred_ids)
+
+        if true_tags == pred_tags:
+            exact_match_count += 1
+        else:
+            error_log.append({
+                "filename": filename,
+                "preprocessed": clean_text,
+                "true": true_tags,
+                "pred": pred_tags,
+            })
+
+    # ----- Метрики -----
+    accuracy = accuracy_score(all_true_label_ids, all_pred_label_ids)
+    p_w, r_w, f1_w, _ = precision_recall_fscore_support(
+        all_true_label_ids, all_pred_label_ids,
+        average="weighted", zero_division=0,
+    )
+    p_m, r_m, f1_m, _ = precision_recall_fscore_support(
+        all_true_label_ids, all_pred_label_ids,
+        average="macro", zero_division=0,
+    )
+    cm = confusion_matrix(
+        all_true_label_ids, all_pred_label_ids,
+        labels=list(range(len(LABELS))),
+    )
+
+    exact_match_ratio = exact_match_count / len(REAL_WORLD_TEST_SET)
+
+    # ----- Вывод результатов -----
+    print(f"\n[3] Результаты")
+    print("-" * 70)
+    print(f"Всего примеров:          {len(REAL_WORLD_TEST_SET)}")
+    print(f"Точные совпадения:       {exact_match_count} / {len(REAL_WORLD_TEST_SET)} "
+          f"({exact_match_ratio:.2%})")
+    print()
+    print(f"Token-level Accuracy:    {accuracy:.4f}")
+    print(f"Precision (weighted):    {p_w:.4f}")
+    print(f"Recall    (weighted):    {r_w:.4f}")
+    print(f"F1-score  (weighted):    {f1_w:.4f}")
+    print(f"Precision (macro):       {p_m:.4f}")
+    print(f"Recall    (macro):       {r_m:.4f}")
+    print(f"F1-score  (macro):       {f1_m:.4f}")
+
+    # ----- Примеры ошибок -----
+    if error_log:
+        print(f"\n[4] Примеры ошибок (показаны первые 10):")
+        print("-" * 70)
+        for err in error_log[:10]:
+            print(f"  Файл:        {err['filename']}")
+            print(f"  После preprocess: {err['preprocessed']}")
+            print(f"  Эталон:      {err['true']}")
+            print(f"  Предсказание: {err['pred']}")
+            print()
+
+    # ----- Сохранение результатов -----
+    output = {
+        "model_version": "v1_baseline_en",
+        "test_set_type": "real_world",
+        "test_set_size": len(REAL_WORLD_TEST_SET),
+        "exact_match_count": exact_match_count,
+        "exact_match_ratio": float(exact_match_ratio),
+        "token_level_metrics": {
+            "accuracy": float(accuracy),
+            "precision_weighted": float(p_w),
+            "recall_weighted": float(r_w),
+            "f1_weighted": float(f1_w),
+            "precision_macro": float(p_m),
+            "recall_macro": float(r_m),
+            "f1_macro": float(f1_m),
+        },
+        "confusion_matrix": cm.tolist(),
+        "labels": LABELS,
+        "errors": error_log,
+    }
+
+    output_path = ROOT_DIR / "ml" / "metrics_v1_real_world.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    print(f"\n[5] Результаты сохранены: {output_path}")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    evaluate_on_real_data()

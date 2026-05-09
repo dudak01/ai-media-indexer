@@ -1,0 +1,434 @@
+{
+  "model_version": "v1_baseline_en",
+  "test_set_type": "real_world",
+  "test_set_size": 52,
+  "exact_match_count": 36,
+  "exact_match_ratio": 0.6923076923076923,
+  "token_level_metrics": {
+    "accuracy": 0.91796875,
+    "precision_weighted": 0.9167302322566035,
+    "recall_weighted": 0.91796875,
+    "f1_weighted": 0.9143341071308652,
+    "precision_macro": 0.9227894167835438,
+    "recall_macro": 0.9064146579882222,
+    "f1_macro": 0.9107285639889968
+  },
+  "confusion_matrix": [
+    [
+      13,
+      2,
+      0,
+      2,
+      0,
+      0,
+      5,
+      0,
+      0
+    ],
+    [
+      0,
+      47,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      61,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      1,
+      30,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0,
+      0,
+      0,
+      39,
+      1,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0,
+      0,
+      0,
+      7,
+      25,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      13,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      7
+    ]
+  ],
+  "labels": [
+    "O",
+    "B-TITLE",
+    "I-TITLE",
+    "B-YEAR",
+    "I-YEAR",
+    "B-QUALITY",
+    "I-QUALITY",
+    "B-ARTIST",
+    "I-ARTIST"
+  ],
+  "errors": [
+    {
+      "filename": "There.Will.Be.Blood.2007.1080p.WEB-DL.mp4",
+      "preprocessed": "There Will Be Blood 2007 1080p WEB DL",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "No.Country.for.Old.Men.2007.2160p.UHD.BluRay.HEVC.mkv",
+      "preprocessed": "No Country for Old Men 2007 2160p UHD BluRay HEVC",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "O",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "Drive.2011.1080p.BluRay.DTS.x264-EbP.mkv",
+      "preprocessed": "Drive 2011 1080p BluRay DTS x264 EbP",
+      "true": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "O",
+        "I-QUALITY",
+        "O"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "O"
+      ]
+    },
+    {
+      "filename": "Sicario_2015_BDRip_1080p.avi",
+      "preprocessed": "Sicario 2015 BDRip 1080p",
+      "true": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "Gone.Girl.2014.WEB-DL.1080p.x265.mkv",
+      "preprocessed": "Gone Girl 2014 WEB DL 1080p x265",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "B-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "The.Matrix.1999.4K.UHD.BluRay.HEVC.mkv",
+      "preprocessed": "The Matrix 1999 4K UHD BluRay HEVC",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "O",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "Interstellar (2014).mkv",
+      "preprocessed": "Interstellar (2014)",
+      "true": [
+        "B-TITLE",
+        "B-YEAR"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE"
+      ]
+    },
+    {
+      "filename": "Иван.Васильевич.меняет.профессию.1973.BDRip.1080p.mkv",
+      "preprocessed": "Иван Васильевич меняет профессию 1973 BDRip 1080p",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "Чебурашка.2023.WEB-DL.1080p.mkv",
+      "preprocessed": "Чебурашка 2023 WEB DL 1080p",
+      "true": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "I-QUALITY",
+        "I-QUALITY",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "Левиафан-2014-BluRay-1080p.mkv",
+      "preprocessed": "Левиафан 2014 BluRay 1080p",
+      "true": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "Levafan.2014.BluRay.1080p.mkv",
+      "preprocessed": "Levafan 2014 BluRay 1080p",
+      "true": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-QUALITY",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "Breaking.Bad.S03E07.1080p.BluRay.x264-DEMAND.mkv",
+      "preprocessed": "Breaking Bad S03E07 1080p BluRay x264 DEMAND",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "O"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "Stranger.Things.S04E01.WEB-DL.1080p.mkv",
+      "preprocessed": "Stranger Things S04E01 WEB DL 1080p",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-QUALITY",
+        "I-QUALITY",
+        "I-QUALITY"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "B-QUALITY"
+      ]
+    },
+    {
+      "filename": "The Witcher S02E03 4K HDR.mkv",
+      "preprocessed": "The Witcher S02E03 4K HDR",
+      "true": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-QUALITY",
+        "O"
+      ],
+      "pred": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-QUALITY",
+        "I-QUALITY"
+      ]
+    },
+    {
+      "filename": "IMG_20240515_142233.jpg",
+      "preprocessed": "IMG 20240515 142233",
+      "true": [
+        "O",
+        "O",
+        "O"
+      ],
+      "pred": [
+        "B-TITLE",
+        "B-YEAR",
+        "B-YEAR"
+      ]
+    },
+    {
+      "filename": "2024_отпуск.mp4",
+      "preprocessed": "2024 отпуск",
+      "true": [
+        "B-YEAR",
+        "O"
+      ],
+      "pred": [
+        "B-YEAR",
+        "B-TITLE"
+      ]
+    }
+  ]
+}
