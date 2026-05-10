@@ -72,6 +72,12 @@ MODEL_VERSIONS = {
         "output_path": ROOT_DIR / "ml" / "metrics_v2_real_world.json",
         "label": "v2_multilingual_cased",
     },
+    "v3": {
+        "base_model": "distilbert-base-multilingual-cased",
+        "weights_path": ROOT_DIR / "ml" / "weights" / "model3.pt",
+        "output_path": ROOT_DIR / "ml" / "metrics_v3_real_world.json",
+        "label": "v3_multilingual_extended_data",
+    },
 }
 
 
@@ -101,10 +107,10 @@ REAL_WORLD_TEST_SET = [
 
     ("No.Country.for.Old.Men.2007.2160p.UHD.BluRay.HEVC.mkv",
      ["B-TITLE", "I-TITLE", "I-TITLE", "I-TITLE", "I-TITLE",
-      "B-YEAR", "B-QUALITY", "O", "I-QUALITY", "I-QUALITY"]),
+      "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY", "I-QUALITY"]),
 
     ("Drive.2011.1080p.BluRay.DTS.x264-EbP.mkv",
-     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "O", "I-QUALITY", "O"]),
+     ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "I-QUALITY", "I-QUALITY", "O"]),
 
     ("Whiplash 2014 1080p BluRay YTS.mp4",
      ["B-TITLE", "B-YEAR", "B-QUALITY", "I-QUALITY", "O"]),
@@ -128,7 +134,7 @@ REAL_WORLD_TEST_SET = [
 
     ("The.Matrix.1999.4K.UHD.BluRay.HEVC.mkv",
      ["B-TITLE", "I-TITLE", "B-YEAR",
-      "B-QUALITY", "O", "I-QUALITY", "I-QUALITY"]),
+      "B-QUALITY", "I-QUALITY", "I-QUALITY", "I-QUALITY"]),
 
     ("Interstellar (2014).mkv",
      ["B-TITLE", "B-YEAR"]),
@@ -501,10 +507,10 @@ def main():
     )
     parser.add_argument(
         "--model",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v1",
-        help="Версия модели для оценки (v1 — baseline; v2 — multilingual). "
-             "По умолчанию: v1.",
+        help="Версия модели для оценки (v1 — baseline; v2 — multilingual; "
+             "v3 — multilingual + extended data). По умолчанию: v1.",
     )
     args = parser.parse_args()
     evaluate_on_real_data(args.model)

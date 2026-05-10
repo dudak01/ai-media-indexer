@@ -8,3 +8,5 @@ db/*.db
 # Тестовая папка с медиафайлами (генерируется автоматически)
 tests/edge_cases/
 ml/weights/model2.ptml/weights/model2.pt 
+ml/weights/model2.pt 
+ml/weights/model3.pt 

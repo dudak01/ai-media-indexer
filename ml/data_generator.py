@@ -222,19 +222,39 @@ TRACKS_RU_LAT = [
 # --- Годы (1950-2024) ---
 YEARS = [str(y) for y in range(1950, 2025)]
 
-# --- Качества для видео ---
+# --- Качества для видео: разрешение ---
 QUALITIES_VIDEO_RES = ["480p", "720p", "1080p", "1440p", "2160p", "4K", "8K"]
+
+# --- Качества для видео: источник ---
 QUALITIES_VIDEO_SRC = ["BluRay", "WEBRip", "WEB DL", "HDRip", "DVDRip", "BDRemux",
-                       "REMUX", "HDTV", "BDRip"]
-QUALITIES_VIDEO_CDC = ["x264", "x265", "H 264", "H 265", "HEVC", "AVC", "DivX", "XviD"]
+                       "REMUX", "HDTV", "BDRip", "BDREMUX", "BRRip", "DVDR"]
 
-# --- Качества для аудио ---
+# --- Качества для видео: видеокодек ---
+QUALITIES_VIDEO_CDC = ["x264", "x265", "H 264", "H 265", "HEVC", "AVC",
+                       "DivX", "XviD", "AV1", "VP9"]
+
+# --- Видеомаркеры (UHD/HDR/IMAX и др. — часть QUALITY) ---
+# Это технические обозначения, которые в реальных raw-именах часто
+# идут вместе с разрешением и источником. Размечаем как QUALITY.
+QUALITIES_VIDEO_MARKERS = ["UHD", "HDR", "HDR10", "HDR10Plus", "DV",
+                           "Dolby Vision", "IMAX", "10bit", "8bit"]
+
+# --- Аудиокодеки (часть QUALITY для видео) ---
+QUALITIES_AUDIO_CODECS = ["DTS", "DTS HD", "DTS X", "DD", "DD5 1", "DDP",
+                          "DDP5 1", "TrueHD", "Atmos", "AC3", "EAC3"]
+
+# --- Качества для аудио (отдельный список для аудиофайлов) ---
 QUALITIES_AUDIO = ["FLAC", "Lossless", "320kbps", "256kbps", "192kbps",
-                   "128kbps", "MP3", "OGG", "ALAC", "M4A", "DSD", "AAC"]
+                   "128kbps", "96kbps", "MP3", "OGG", "ALAC", "M4A",
+                   "DSD", "AAC", "ALAC"]
 
-# --- Релиз-группы (для шаблонов с -GROUP) ---
-RELEASE_GROUPS = ["RARBG", "YIFY", "EVO", "MZABI", "FGT", "PSA", "SPARKS",
-                  "GECKOS", "CMRG", "KOGi", "TGx", "CHD", "WiKi"]
+# --- Релиз-группы (расширенный список реальных групп с трекеров) ---
+RELEASE_GROUPS = [
+    "RARBG", "YIFY", "YTS", "EVO", "MZABI", "FGT", "PSA", "SPARKS",
+    "GECKOS", "CMRG", "KOGi", "TGx", "CHD", "WiKi", "AMIABLE", "AMZN",
+    "CtrlHD", "EbP", "BTN", "ION10", "GalaxyRG", "HONE", "MEZG",
+    "BluHD", "DEMAND", "DRONES", "TBS", "AVS", "SiNNERS", "FoV",
+]
 
 
 # =========================================================================
@@ -254,17 +274,31 @@ def make_iob(words, label):
 def random_video_quality():
     """
     Возвращает случайную комбинацию характеристик видеокачества как
-    список одиночных токенов. Использует .split() на каждом значении,
-    чтобы многословные форматы вроде "WEB DL", "H 264" корректно
-    превращались в отдельные токены и не ломали выравнивание разметки.
+    список одиночных токенов. В новой версии (v4) расширены:
+    - добавлены видеомаркеры (UHD, HDR, IMAX, Dolby Vision)
+    - добавлены аудиокодеки (DTS, Atmos, DDP5.1) — все они в реальных
+      именах файлов идут как часть метаданных качества
+    Использует .split() на каждом значении, чтобы многословные форматы
+    вроде "WEB DL", "DTS HD", "Dolby Vision" корректно превращались
+    в отдельные токены и не ломали выравнивание разметки.
     """
     parts = []
-    if random.random() > 0.1:
+    # Разрешение (почти всегда)
+    if random.random() > 0.05:
         parts.extend(random.choice(QUALITIES_VIDEO_RES).split())
-    if random.random() > 0.4:
+    # Маркер UHD/HDR/IMAX (примерно в трети случаев, после разрешения)
+    if random.random() > 0.65:
+        parts.extend(random.choice(QUALITIES_VIDEO_MARKERS).split())
+    # Источник (часто)
+    if random.random() > 0.25:
         parts.extend(random.choice(QUALITIES_VIDEO_SRC).split())
-    if random.random() > 0.6:
+    # Видеокодек (часто)
+    if random.random() > 0.40:
         parts.extend(random.choice(QUALITIES_VIDEO_CDC).split())
+    # Аудиокодек (примерно в трети случаев)
+    if random.random() > 0.65:
+        parts.extend(random.choice(QUALITIES_AUDIO_CODECS).split())
+    # Гарантия минимум одного токена
     if not parts:
         parts.extend(random.choice(QUALITIES_VIDEO_RES).split())
     return parts
@@ -443,7 +477,9 @@ def gen_movie_en():
     )[0]
 
     if template == template_movie_classic:
-        group = random.choice(RELEASE_GROUPS) if random.random() > 0.6 else None
+        # Релиз-группы теперь добавляются в ~70% классических шаблонов
+        # (было 40%) — важно для обучения модели правильно их относить к O
+        group = random.choice(RELEASE_GROUPS) if random.random() > 0.3 else None
         return template(title, year, quality, group)
     elif template == template_movie_minimal:
         return template(title, year)
@@ -464,7 +500,9 @@ def gen_movie_ru_lat():
         weights=[60, 25, 15], k=1
     )[0]
     if template == template_movie_classic:
-        return template(title, year, quality)
+        # Релиз-группы и в русских транслитах тоже частые
+        group = random.choice(RELEASE_GROUPS) if random.random() > 0.5 else None
+        return template(title, year, quality, group)
     elif template == template_movie_minimal:
         return template(title, year)
     else:
@@ -480,7 +518,9 @@ def gen_movie_ru_cyr():
         weights=[55, 30, 15], k=1
     )[0]
     if template == template_movie_classic:
-        return template(title, year, quality)
+        # Для русских raw релизов группы тоже бывают, особенно у zamunda/rutracker
+        group = random.choice(RELEASE_GROUPS) if random.random() > 0.5 else None
+        return template(title, year, quality, group)
     elif template == template_movie_minimal:
         return template(title, year)
     else:

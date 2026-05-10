@@ -3,16 +3,16 @@
   "base_model": "distilbert-base-multilingual-cased",
   "test_set_type": "real_world",
   "test_set_size": 52,
-  "exact_match_count": 34,
-  "exact_match_ratio": 0.6538461538461539,
+  "exact_match_count": 37,
+  "exact_match_ratio": 0.7115384615384616,
   "token_level_metrics": {
-    "accuracy": 0.9140625,
-    "precision_weighted": 0.9199724748770476,
-    "recall_weighted": 0.9140625,
-    "f1_weighted": 0.9101114738126457,
-    "precision_macro": 0.939049727646721,
-    "recall_macro": 0.8554920828428035,
-    "f1_macro": 0.8834620642502848
+    "accuracy": 0.92578125,
+    "precision_weighted": 0.9316912248770476,
+    "recall_weighted": 0.92578125,
+    "f1_weighted": 0.9232434273852185,
+    "precision_macro": 0.9511465018402694,
+    "recall_macro": 0.8702614874148397,
+    "f1_macro": 0.8989469033125493
   },
   "confusion_matrix": [
     [
@@ -22,7 +22,7 @@
       1,
       0,
       1,
-      5,
+      2,
       0,
       0
     ],
@@ -88,7 +88,7 @@
       0,
       0,
       7,
-      26,
+      29,
       0,
       0
     ],
@@ -148,56 +148,6 @@
       ]
     },
     {
-      "filename": "No.Country.for.Old.Men.2007.2160p.UHD.BluRay.HEVC.mkv",
-      "preprocessed": "No Country for Old Men 2007 2160p UHD BluRay HEVC",
-      "true": [
-        "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "O",
-        "I-QUALITY",
-        "I-QUALITY"
-      ],
-      "pred": [
-        "B-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "I-QUALITY",
-        "I-QUALITY",
-        "I-QUALITY"
-      ]
-    },
-    {
-      "filename": "Drive.2011.1080p.BluRay.DTS.x264-EbP.mkv",
-      "preprocessed": "Drive 2011 1080p BluRay DTS x264 EbP",
-      "true": [
-        "B-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "I-QUALITY",
-        "O",
-        "I-QUALITY",
-        "O"
-      ],
-      "pred": [
-        "B-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "I-QUALITY",
-        "I-QUALITY",
-        "I-QUALITY",
-        "O"
-      ]
-    },
-    {
       "filename": "Sicario_2015_BDRip_1080p.avi",
       "preprocessed": "Sicario 2015 BDRip 1080p",
       "true": [
@@ -232,28 +182,6 @@
         "B-QUALITY",
         "I-QUALITY",
         "B-QUALITY",
-        "I-QUALITY"
-      ]
-    },
-    {
-      "filename": "The.Matrix.1999.4K.UHD.BluRay.HEVC.mkv",
-      "preprocessed": "The Matrix 1999 4K UHD BluRay HEVC",
-      "true": [
-        "B-TITLE",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "O",
-        "I-QUALITY",
-        "I-QUALITY"
-      ],
-      "pred": [
-        "B-TITLE",
-        "I-TITLE",
-        "B-YEAR",
-        "B-QUALITY",
-        "I-QUALITY",
-        "I-QUALITY",
         "I-QUALITY"
       ]
     },

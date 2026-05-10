@@ -1,6 +1,6 @@
 """
 =============================================================================
-Сравнительный анализ моделей v1 и v2 на синтетическом и реалистичном
+Сравнительный анализ моделей v1, v2 и v3 на синтетическом и реалистичном
 тестовых наборах. Генерирует таблицу метрик и столбчатую диаграмму.
 
 Тема ВКР: «Индексация медиаконтента и обогащение метаданных
@@ -9,6 +9,16 @@
 Автор:  Феденко Никита Александрович
 Группа: ИД 23.1/Б3-22
 Год:    2026
+
+Описание:
+    Скрипт строит итоговое сравнение трёх итераций модели:
+        v1 — baseline (distilbert-base-uncased)
+        v2 — multilingual (distilbert-base-multilingual-cased)
+        v3 — multilingual + расширенный обучающий датасет
+
+    Для каждой модели сравниваются метрики на двух тестах:
+        - синтетический (in-distribution)
+        - реалистичный (out-of-distribution, 52 примера вручную)
 =============================================================================
 """
 
@@ -23,56 +33,72 @@ ML_DIR = ROOT_DIR / "ml"
 PLOTS_DIR = ML_DIR / "plots"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
+VERSIONS = ["v1", "v2", "v3"]
+VERSION_LABELS = {
+    "v1": "v1\n(baseline)",
+    "v2": "v2\n(multilingual)",
+    "v3": "v3\n(multi + ext.data)",
+}
+VERSION_COLORS = {
+    "v1": "#4F81BD",  # синий
+    "v2": "#9BBB59",  # зелёный
+    "v3": "#C0504D",  # красный
+}
+
 
 def load_metrics():
-    """Загружает все 4 JSON-файла с метриками."""
-    files = {
-        "v1_synthetic": ML_DIR / "metrics_v1.json",
-        "v2_synthetic": ML_DIR / "metrics_v2.json",
-        "v1_real": ML_DIR / "metrics_v1_real_world.json",
-        "v2_real": ML_DIR / "metrics_v2_real_world.json",
-    }
+    """Загружает все 6 JSON-файлов с метриками."""
+    files = {}
+    for v in VERSIONS:
+        files[f"{v}_synthetic"] = ML_DIR / f"metrics_{v}.json"
+        files[f"{v}_real"] = ML_DIR / f"metrics_{v}_real_world.json"
 
     data = {}
+    missing = []
     for key, path in files.items():
         if not path.exists():
-            print(f"[!] Файл не найден: {path}")
-            return None
+            missing.append(str(path))
+            continue
         with open(path, "r", encoding="utf-8") as f:
             data[key] = json.load(f)
+
+    if missing:
+        print("[!] Не найдены файлы:")
+        for m in missing:
+            print(f"    {m}")
+        return None
     return data
 
 
 def extract_metrics(data):
-    """Извлекает 4 ключевых метрики из каждого JSON в единый формат."""
+    """Извлекает 5 ключевых метрик из каждого JSON в единый формат."""
     result = {}
-    for key in ["v1_synthetic", "v2_synthetic"]:
-        m = data[key]["final_metrics"]
-        result[key] = {
+    for v in VERSIONS:
+        # Synthetic
+        m = data[f"{v}_synthetic"]["final_metrics"]
+        result[f"{v}_synthetic"] = {
             "accuracy": m["accuracy"],
             "precision_weighted": m["precision_weighted"],
             "recall_weighted": m["recall_weighted"],
             "f1_weighted": m["f1_weighted"],
             "f1_macro": m["f1_macro"],
+            "exact_match": None,  # для synthetic не определён
         }
-    for key in ["v1_real", "v2_real"]:
-        m = data[key]["token_level_metrics"]
-        result[key] = {
+        # Real-world
+        m = data[f"{v}_real"]["token_level_metrics"]
+        result[f"{v}_real"] = {
             "accuracy": m["accuracy"],
             "precision_weighted": m["precision_weighted"],
             "recall_weighted": m["recall_weighted"],
             "f1_weighted": m["f1_weighted"],
             "f1_macro": m["f1_macro"],
+            "exact_match": data[f"{v}_real"]["exact_match_ratio"],
         }
     return result
 
 
 def print_comparison_table(metrics):
-    """Печатает сравнительную таблицу в консоль."""
-    print("\n" + "=" * 80)
-    print(" СРАВНЕНИЕ МОДЕЛЕЙ v1 vs v2 ".center(80, "="))
-    print("=" * 80)
-
+    """Печатает сравнительные таблицы в консоль."""
     metric_names = [
         ("accuracy",            "Accuracy"),
         ("precision_weighted",  "Precision (weighted)"),
@@ -81,82 +107,141 @@ def print_comparison_table(metrics):
         ("f1_macro",            "F1-score (macro)"),
     ]
 
-    for test_type, suffix in [("synthetic", "Synthetic test"),
-                              ("real", "Real-world test")]:
-        v1 = metrics[f"v1_{test_type}"]
-        v2 = metrics[f"v2_{test_type}"]
-        print(f"\n--- {suffix} ---")
-        print(f"{'Метрика':<25} | {'v1':>10} | {'v2':>10} | {'Δ':>8}")
-        print("-" * 60)
+    print("\n" + "=" * 80)
+    print(" СРАВНЕНИЕ ТРЁХ МОДЕЛЕЙ ".center(80, "="))
+    print("=" * 80)
+
+    for test_type, test_label in [
+        ("synthetic", "СИНТЕТИЧЕСКИЙ ТЕСТ (in-distribution)"),
+        ("real",      "РЕАЛИСТИЧНЫЙ ТЕСТ (out-of-distribution, 52 примера)"),
+    ]:
+        print(f"\n--- {test_label} ---")
+        header = f"{'Метрика':<25}"
+        for v in VERSIONS:
+            header += f" | {v:>10}"
+        print(header)
+        print("-" * len(header))
+
         for key, label in metric_names:
-            delta = v2[key] - v1[key]
-            sign = "+" if delta >= 0 else ""
-            print(f"{label:<25} | {v1[key]:>10.4f} | {v2[key]:>10.4f} | "
-                  f"{sign}{delta*100:>6.2f}%")
+            row = f"{label:<25}"
+            for v in VERSIONS:
+                row += f" | {metrics[f'{v}_{test_type}'][key]:>10.4f}"
+            print(row)
+
+        # Exact match только для real
+        if test_type == "real":
+            row = f"{'Exact match':<25}"
+            for v in VERSIONS:
+                em = metrics[f"{v}_real"]["exact_match"]
+                row += f" | {em:>9.2%}"
+            print(row)
+
+    # Дельты для real-world
+    print("\n--- ПРИРОСТЫ НА РЕАЛИСТИЧНОМ ТЕСТЕ ---")
+    print(f"{'Метрика':<25} | {'v1→v2':>10} | {'v2→v3':>10} | {'v1→v3':>10}")
+    print("-" * 70)
+    for key, label in metric_names:
+        v1 = metrics["v1_real"][key]
+        v2 = metrics["v2_real"][key]
+        v3 = metrics["v3_real"][key]
+        d12 = (v2 - v1) * 100
+        d23 = (v3 - v2) * 100
+        d13 = (v3 - v1) * 100
+        print(f"{label:<25} | {d12:>+9.2f}% | {d23:>+9.2f}% | {d13:>+9.2f}%")
 
     print("\n" + "=" * 80)
 
 
 def plot_comparison(metrics, save_path):
-    """Строит сгруппированную столбчатую диаграмму сравнения."""
+    """Строит сгруппированную столбчатую диаграмму сравнения трёх моделей."""
     metric_keys = ["accuracy", "precision_weighted", "recall_weighted",
                    "f1_weighted", "f1_macro"]
     metric_labels = ["Accuracy", "Precision\n(weighted)", "Recall\n(weighted)",
                      "F1-score\n(weighted)", "F1-score\n(macro)"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
 
     for ax, test_type, title in [
         (axes[0], "synthetic", "Synthetic test (in-distribution)"),
         (axes[1], "real", "Real-world test (out-of-distribution)"),
     ]:
-        v1_vals = [metrics[f"v1_{test_type}"][k] for k in metric_keys]
-        v2_vals = [metrics[f"v2_{test_type}"][k] for k in metric_keys]
-
         x = np.arange(len(metric_keys))
-        width = 0.35
+        width = 0.27
 
-        bars1 = ax.bar(x - width/2, v1_vals, width,
-                       label="v1 (distilbert-base-uncased)",
-                       color="#4F81BD")
-        bars2 = ax.bar(x + width/2, v2_vals, width,
-                       label="v2 (multilingual-cased)",
-                       color="#C0504D")
-
-        # Подписи значений над столбцами
-        for bars in [bars1, bars2]:
+        for i, v in enumerate(VERSIONS):
+            vals = [metrics[f"{v}_{test_type}"][k] for k in metric_keys]
+            offset = (i - 1) * width
+            bars = ax.bar(x + offset, vals, width,
+                          label=VERSION_LABELS[v].replace("\n", " "),
+                          color=VERSION_COLORS[v])
             for bar in bars:
                 h = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2, h + 0.005,
-                        f"{h:.3f}", ha="center", va="bottom", fontsize=8)
+                        f"{h:.3f}", ha="center", va="bottom", fontsize=7,
+                        rotation=0)
 
-        ax.set_title(title)
+        ax.set_title(title, fontsize=12)
         ax.set_xticks(x)
         ax.set_xticklabels(metric_labels, fontsize=9)
         ax.set_ylim(0, 1.08)
         ax.set_ylabel("Значение метрики")
-        ax.legend(loc="lower right")
+        ax.legend(loc="lower right", fontsize=9)
         ax.grid(True, axis="y", alpha=0.3)
 
-    fig.suptitle("Сравнение моделей v1 (English baseline) и "
-                 "v2 (Multilingual)", fontsize=13, y=1.02)
+    fig.suptitle("Сравнение моделей v1, v2 и v3 (DistilBERT NER)",
+                 fontsize=13, y=1.02)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"\nГрафик сохранён: {save_path}")
 
 
+def plot_realworld_only(metrics, save_path):
+    """Отдельный график только для real-world (главный для ВКР)."""
+    metric_keys = ["accuracy", "f1_weighted", "f1_macro"]
+    metric_labels = ["Token\nAccuracy", "F1-score\n(weighted)", "F1-score\n(macro)"]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    x = np.arange(len(metric_keys))
+    width = 0.27
+
+    for i, v in enumerate(VERSIONS):
+        vals = [metrics[f"{v}_real"][k] for k in metric_keys]
+        offset = (i - 1) * width
+        bars = ax.bar(x + offset, vals, width,
+                      label=VERSION_LABELS[v].replace("\n", " "),
+                      color=VERSION_COLORS[v])
+        for bar in bars:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2, h + 0.003,
+                    f"{h:.4f}", ha="center", va="bottom", fontsize=9)
+
+    ax.set_title("Сравнение моделей на реалистичном тестовом наборе",
+                 fontsize=13)
+    ax.set_xticks(x)
+    ax.set_xticklabels(metric_labels, fontsize=10)
+    ax.set_ylim(0.80, 0.96)  # обрезаем для лучшей видимости разницы
+    ax.set_ylabel("Значение метрики")
+    ax.legend(loc="lower right")
+    ax.grid(True, axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"График real-world сохранён: {save_path}")
+
+
 def main():
     data = load_metrics()
     if data is None:
-        print("[FAIL] Не удалось загрузить все метрики. "
-              "Запустите train.py, train_v2.py и оба прогона "
-              "test_on_real_data.py перед сравнением.")
+        print("[FAIL] Не удалось загрузить все метрики.")
         return
 
     metrics = extract_metrics(data)
     print_comparison_table(metrics)
-    plot_comparison(metrics, PLOTS_DIR / "comparison_v1_vs_v2.png")
+    plot_comparison(metrics, PLOTS_DIR / "comparison_v1_v2_v3.png")
+    plot_realworld_only(metrics, PLOTS_DIR / "comparison_realworld_v1_v2_v3.png")
 
 
 if __name__ == "__main__":
