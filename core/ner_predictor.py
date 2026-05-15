@@ -6,17 +6,30 @@
            с использованием интеллектуального анализа данных»
 
 Автор:  Феденко Никита Александрович
-Группа: Группа: ИД 23.1/Б3-22
+Группа: ИД 23.1/Б3-22
 Год:    2026
 
 Описание:
-    Модуль загружает веса предобученной DistilBERT-модели (model.pt)
-    и применяет её для извлечения именованных сущностей из имён
-    медиафайлов. Распознаваемые сущности:
+    Модуль загружает веса предобученной DistilBERT-модели (model2.pt,
+    версия v2 — multilingual) и применяет её для извлечения
+    именованных сущностей из имён медиафайлов. Распознаваемые сущности:
         - TITLE   (название произведения)
         - YEAR    (год выпуска)
         - QUALITY (качество видео/аудио)
         - ARTIST  (исполнитель / автор)
+
+    Базовая модель distilbert-base-multilingual-cased выбрана по итогам
+    Этапа 3 как наилучшая на реалистичном тесте (см. RESEARCH_LOG,
+    Запись №4): F1 = 0.9232, Token Accuracy = 0.9258 на out-of-distribution
+    наборе из 52 размеченных вручную имён медиафайлов.
+
+    Логика сборки сущностей:
+        - инференс модели на subword-токенах WordPiece
+        - сборка subword-токенов в исходные слова через is_continuation
+          (для multilingual-токенизатора с префиксами ##)
+        - для каждого слова берётся метка ПЕРВОГО subtoken'a
+        - регекс-постобработка для нормализации технических токенов
+          (1080p, BluRay, x264 и т.д.)
 =============================================================================
 """
 
@@ -33,7 +46,9 @@ LABELS = ["O", "B-TITLE", "I-TITLE", "B-YEAR", "I-YEAR", "B-QUALITY", "I-QUALITY
 ID2LABEL = {i: label for i, label in enumerate(LABELS)}
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_WEIGHTS_PATH = os.path.join(BASE_DIR, 'ml', 'weights', 'model.pt')
+MODEL_WEIGHTS_PATH = os.path.join(BASE_DIR, 'ml', 'weights', 'model2.pt')
+BASE_MODEL_NAME = 'distilbert-base-multilingual-cased'
+
 
 class NERPredictor:
     def __init__(self):
@@ -41,9 +56,9 @@ class NERPredictor:
         logger.info(f"Инициализация NERPredictor на устройстве: {self.device}")
 
         try:
-            self.tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
+            self.tokenizer = DistilBertTokenizerFast.from_pretrained(BASE_MODEL_NAME)
             self.model = DistilBertForTokenClassification.from_pretrained(
-                'distilbert-base-uncased',
+                BASE_MODEL_NAME,
                 num_labels=len(LABELS)
             )
             self._load_weights()
@@ -66,97 +81,93 @@ class NERPredictor:
         if not self.model or not text.strip():
             return {}
 
-        # Препроцессинг: удаляем расширение, скобки и разделители
+        # ===== Препроцессинг =====
+        # 1. Удаляем расширение файла
         clean_text = re.sub(r'\.[a-zA-Z0-9]{2,4}$', '', text)
-        # Убираем все виды скобок (круглые, квадратные, фигурные)
+        # 2. Убираем все виды скобок (круглые, квадратные, фигурные)
         clean_text = re.sub(r'[\(\)\[\]\{\}]', ' ', clean_text)
-        # Заменяем разделители имён файлов на пробелы
+        # 3. Заменяем разделители имён файлов на пробелы
         clean_text = clean_text.replace('.', ' ').replace('_', ' ').replace('-', ' ')
-        # Схлопываем последовательные пробелы
+        # 4. Схлопываем последовательные пробелы
         clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        
-        inputs = self.tokenizer(
-            clean_text,
+
+        if not clean_text:
+            return {}
+
+        # ===== Инференс на уровне СЛОВ (а не subword'ов) =====
+        # Разбиваем строку на слова и подаём как is_split_into_words=True.
+        # Тогда tokenizer создаст word_ids() — отображение subtoken→word,
+        # которое позволит правильно собрать предсказания на уровне слов.
+        words = clean_text.split()
+        if not words:
+            return {}
+
+        encoding = self.tokenizer(
+            words,
+            is_split_into_words=True,
             return_tensors="pt",
             truncation=True,
-            return_offsets_mapping=True
+            max_length=128,
         )
-
-        offset_mapping = inputs.pop("offset_mapping").squeeze().tolist()
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        word_ids = encoding.word_ids()
+        inputs = {k: v.to(self.device) for k, v in encoding.items()}
 
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits
             predictions = torch.argmax(logits, dim=2).squeeze().tolist()
 
+        # Для каждого слова берём метку ПЕРВОГО subtoken'a
+        word_to_label = {}
+        for tok_idx, word_idx in enumerate(word_ids):
+            if word_idx is None:
+                continue
+            if word_idx not in word_to_label:
+                word_to_label[word_idx] = ID2LABEL[predictions[tok_idx]]
+
+        # ===== Группировка слов по сущностям =====
         extracted_data = {"title": [], "year": [], "quality": [], "artist": []}
 
-        for idx, pred_idx in enumerate(predictions):
-            if offset_mapping[idx] == [0, 0]:
-                continue
-
-            label = ID2LABEL[pred_idx]
+        for word_idx, word in enumerate(words):
+            label = word_to_label.get(word_idx, "O")
             if label == "O":
                 continue
-
-            start, end = offset_mapping[idx]
-            token_text = clean_text[start:end]
-
             if "TITLE" in label:
-                extracted_data["title"].append(token_text)
+                extracted_data["title"].append(word)
             elif "YEAR" in label:
-                extracted_data["year"].append(token_text)
+                extracted_data["year"].append(word)
             elif "QUALITY" in label:
-                extracted_data["quality"].append(token_text)
+                extracted_data["quality"].append(word)
             elif "ARTIST" in label:
-                extracted_data["artist"].append(token_text)
+                extracted_data["artist"].append(word)
 
         return {
-            "title": self._clean_assembled_text(extracted_data["title"]),
-            "year": self._clean_assembled_text(extracted_data["year"]),
+            "title":   self._clean_assembled_text(extracted_data["title"]),
+            "year":    self._clean_assembled_text(extracted_data["year"]),
             "quality": self._clean_assembled_text(extracted_data["quality"]),
-            "artist": self._clean_assembled_text(extracted_data["artist"]),
+            "artist":  self._clean_assembled_text(extracted_data["artist"]),
         }
 
-    def _clean_assembled_text(self, tokens: List[str]) -> str:
-        if not tokens:
+    def _clean_assembled_text(self, words: List[str]) -> str:
+        """
+        Постобработка сущности: соединение слов в строку и нормализация
+        типичных технических токенов (форматы качества, кодеки и т.д.).
+        """
+        if not words:
             return ""
 
-        assembled = " ".join(tokens)
-        assembled = assembled.replace(" ##", "").replace("##", "")
+        assembled = " ".join(words)
 
-        # Числа: "108 0" -> "1080", повторяем дважды
-        assembled = re.sub(r'(\d)\s+(\d)', r'\1\2', assembled)
-        assembled = re.sub(r'(\d)\s+(\d)', r'\1\2', assembled)
+        # Нормализация технических токенов:
 
-        # Разрешения: "1080 p" -> "1080p"
-        assembled = re.sub(r'(\d)\s+p\b', r'\1p', assembled)
+        # BluRay (на случай если разделитель внутри попал)
+        assembled = re.sub(r'\bBlu\s*-?\s*Ray\b', 'BluRay', assembled, flags=re.IGNORECASE)
 
-        # 4K/2K: "4 K" -> "4K"
-        assembled = re.sub(r'(\d)\s+K\b', r'\1K', assembled)
+        # WEB-DL, WEB-Rip
+        assembled = re.sub(r'\bWEB\s+DL\b',  'WEB-DL',  assembled, flags=re.IGNORECASE)
+        assembled = re.sub(r'\bWEB\s+Rip\b', 'WEB-Rip', assembled, flags=re.IGNORECASE)
 
-        # BluRay
-        assembled = re.sub(r'\bBlu\s*R\s*ay\b', 'BluRay', assembled, flags=re.IGNORECASE)
-
-        # WEB-DL
-        assembled = re.sub(r'\bWEB\s+DL\b', 'WEB-DL', assembled, flags=re.IGNORECASE)
-
-        # HDRip, HDTV
+        # HDRip, HDTV — на случай если попали раздельно
         assembled = re.sub(r'\bHD\s+(Rip|TV)\b', r'HD\1', assembled, flags=re.IGNORECASE)
-
-        # Lossless
-        assembled = re.sub(r'\bLoss\s+less\b', 'Lossless', assembled, flags=re.IGNORECASE)
-
-        # kbps
-        assembled = re.sub(r'\bk\s+b\s+ps\b', 'kbps', assembled, flags=re.IGNORECASE)
-
-        # x264, x265, h264, h265
-        assembled = re.sub(r'\b(x|h)\s*26\s*(\d)\b', r'\g<1>26\2', assembled, flags=re.IGNORECASE)
-
-        # Склейка только латинских разбитых слов типа "Inter stellar" -> "Interstellar"
-        # Условие: первая часть латиница 2-6 букв, вторая часть строчная латиница
-        # НЕ трогаем кириллицу и числа
-        assembled = re.sub(r'\b([A-Za-z]{2,6})\s+([a-z]{2,})\b', r'\1\2', assembled)
 
         return assembled.strip()

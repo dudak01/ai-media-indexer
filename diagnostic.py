@@ -21,15 +21,17 @@ for root, dirs, files in os.walk('.'):
         if f.endswith('.pyc') or f.endswith('.csv'): continue # Скрываем тяжелые данные
         print(f"{subindent}📄 {f}")
 
-# 2. Проверяем веса обученной модели
-print("\n[2] СОСТОЯНИЕ ML МОДЕЛИ:")
-model_path = Path('ml/weights/model.pt')
-if model_path.exists():
-    size_mb = model_path.stat().st_size / (1024 * 1024)
-    print(f" ✅ Файл весов найден: {model_path}")
-    print(f" 📊 Размер файла: {size_mb:.2f} МБ")
-else:
-    print(f" ❌ ФАЙЛ ВЕСОВ НЕ НАЙДЕН по пути {model_path}!")
+# 2. Проверяем веса обученных моделей (v1 и v2)
+print("\n[2] СОСТОЯНИЕ ML МОДЕЛЕЙ:")
+for label, fname in [("v1 (baseline, English)", "model.pt"),
+                     ("v2 (multilingual, production)", "model2.pt")]:
+    model_path = Path('ml/weights') / fname
+    if model_path.exists():
+        size_mb = model_path.stat().st_size / (1024 * 1024)
+        print(f" ✅ {label}: {model_path}")
+        print(f"    📊 Размер: {size_mb:.2f} МБ")
+    else:
+        print(f" ⚠ {label}: файл не найден ({model_path})")
 
 # 3. Проверяем базу данных
 print("\n[3] СОСТОЯНИЕ БАЗЫ ДАННЫХ:")
