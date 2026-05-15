@@ -1,5 +1,26 @@
 """
+=============================================================================
 Модуль семантического обогащения метаданных.
+
+Тема ВКР: «Индексация медиаконтента и обогащение метаданных
+           с использованием интеллектуального анализа данных»
+
+Автор:  Феденко Никита Александрович
+Группа: ИД 23.1/Б3-22
+Год:    2026
+
+Описание:
+    Внешние сервисы обогащения метаданных по типу медиафайла:
+        - video → Cinemagoer (IMDb) + локальный fallback-кэш
+        - audio → Shazam (через shazamio)
+        - image → EasyOCR (распознавание текста на картинке)
+
+    Async-логика заточена под вызов из синхронного контекста
+    (включая фоновый QThread в PyQt5) — для каждого вызова
+    создаётся изолированный event loop, что гарантирует
+    корректную работу в любом потоке и совместимость с
+    Python 3.11 и выше.
+=============================================================================
 """
 
 import logging
@@ -7,6 +28,7 @@ import asyncio
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
+
 
 class EnrichmentService:
     def __init__(self):
@@ -29,6 +51,7 @@ class EnrichmentService:
         try:
             from shazamio import Shazam
             self.shazam = Shazam()
+            logger.info("Shazamio инициализирован успешно.")
         except ImportError:
             self.shazam = None
             logger.warning("Библиотека Shazamio не установлена.")
@@ -93,24 +116,56 @@ class EnrichmentService:
             return {}
 
     async def enrich_audio(self, file_path: str) -> Dict[str, Any]:
+        """
+        Распознаёт аудиокомпозицию через Shazam.
+        Возвращает словарь с ключами shazam_title, shazam_subtitle, shazam_genre.
+        """
         if not self.shazam:
+            logger.warning("Shazam не инициализирован — пропускаю аудио-обогащение.")
             return {}
         try:
+            logger.info(f"Shazam: распознаю файл {file_path}")
             out = await self.shazam.recognize(file_path)
+
             if 'track' in out:
-                return {
-                    'shazam_title': out['track'].get('title'),
-                    'shazam_subtitle': out['track'].get('subtitle'),
-                    'shazam_genre': out['track'].get('genres', {}).get('primary')
+                track = out['track']
+                result = {
+                    'shazam_title': track.get('title'),
+                    'shazam_subtitle': track.get('subtitle'),
+                    'shazam_genre': (track.get('genres') or {}).get('primary'),
                 }
+                logger.info(
+                    f"Shazam распознал: title='{result['shazam_title']}', "
+                    f"artist='{result['shazam_subtitle']}', "
+                    f"genre='{result['shazam_genre']}'"
+                )
+                return result
+            else:
+                logger.info(f"Shazam не нашёл совпадений для {file_path}")
+                return {}
         except Exception as e:
-            logger.warning(f"Ошибка Shazam при обработке {file_path}: {e}")
-        return {}
+            logger.warning(
+                f"Ошибка Shazam при обработке {file_path}: "
+                f"{type(e).__name__}: {e}"
+            )
+            return {}
 
     def _run_async(self, coro) -> Dict[str, Any]:
+        """
+        Универсальный запуск coroutine из синхронного контекста.
+
+        Создаёт изолированный event loop для каждого вызова —
+        это гарантирует работу из любого потока (в том числе из
+        фонового QThread в PyQt5-приложении), и совместимо с
+        Python 3.11+.
+
+        Метод asyncio.get_event_loop() считается устаревшим
+        начиная с Python 3.10 и в новых версиях может выдавать
+        DeprecationWarning или некорректное поведение, поэтому
+        используется явное создание нового loop.
+        """
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
