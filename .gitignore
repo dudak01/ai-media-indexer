@@ -10,3 +10,23 @@ tests/edge_cases/
 ml/weights/model2.ptml/weights/model2.pt 
 ml/weights/model2.pt 
 ml/weights/model3.pt 
+# Тестовые БД
+db/test_*.db
+db/*_test.db
+
+# HuggingFace cache
+ml/cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Системные
+*.DS_Store
+Thumbs.db
+# Локальные медиафайлы для демо (не в публичный репо)
+demo_media/
+
+# Рабочие артефакты для AI-ассистента (не нужны в репо)
+all_python_code.md
+project_tree.txt
