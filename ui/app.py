@@ -1,5 +1,29 @@
+"""
+=============================================================================
+GUI-приложение "Интеллектуальный Индексатор Медиаконтента".
+
+Тема ВКР: «Индексация медиаконтента и обогащение метаданных
+           с использованием интеллектуального анализа данных»
+
+Автор:  Феденко Никита Александрович
+Группа: ИД 23.1/Б3-22
+Год:    2026
+
+Описание:
+    Графический интерфейс на PyQt5 — связующее звено между
+    пользователем и интеллектуальным ядром системы.
+    Фоновая обработка медиафайлов выполняется в QThread (MLWorker),
+    что не блокирует UI во время длительной индексации.
+
+    Поток индексации:
+        DirectoryScanner → TechnicalMetadataExtractor → NERPredictor →
+        → EnrichmentService → VectorDatabase (text + image FAISS)
+=============================================================================
+"""
+
 import sys
 import os
+import re
 import time
 from pathlib import Path
 
@@ -26,6 +50,19 @@ except ImportError as e:
     print(f"Критическая ошибка импорта: {e}")
     CORE_AVAILABLE = False
 
+
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ИНДЕКСАЦИИ
+# ============================================================================
+
+def has_cyrillic(text: str) -> bool:
+    """True, если в тексте есть кириллические символы."""
+    return bool(text) and bool(re.search(r'[а-яёА-ЯЁ]', text))
+
+
+# ============================================================================
+# ФОНОВЫЙ ПОТОК АНАЛИЗА
+# ============================================================================
 
 class MLWorker(QThread):
     log_signal = pyqtSignal(str)
@@ -102,14 +139,19 @@ class MLWorker(QThread):
                 }
 
                 # 7. Добавляем в векторную базу
+                # ----- IMAGE -----
+                # Гибридная индексация: визуальный канал CLIP по
+                # содержимому изображения + текстовый канал по имени
+                # файла с маркером типа.
                 if ftype == 'image':
                     vector_db.add_image(media.full_path, payload)
-                    ocr_text = enriched.get('ocr_text', '')
-                    if ocr_text:
-                        vector_db.add_text(
-                            f"изображение фото {ocr_text}",
-                            payload
-                        )
+                    parts = ['фотография фото изображение photo image', stem]
+                    search_text = " ".join(parts)
+                    vector_db.add_text(search_text, payload)
+
+                # ----- AUDIO -----
+                # Используем результаты Shazam, если они вернулись,
+                # чтобы семантический поиск работал и по жанрам.
                 elif ftype == 'audio':
                     parts = ['музыка аудио песня трек']
                     if artist:
@@ -118,10 +160,24 @@ class MLWorker(QThread):
                         parts.append(f"название {title}")
                     if quality and quality != '---':
                         parts.append(quality)
+
+                    # Shazam (если сработал)
+                    if enriched.get('shazam_title'):
+                        parts.append(f"shazam {enriched['shazam_title']}")
+                    if enriched.get('shazam_subtitle'):
+                        parts.append(f"shazam-исполнитель {enriched['shazam_subtitle']}")
+                    if enriched.get('shazam_genre'):
+                        parts.append(f"жанр {enriched['shazam_genre']}")
+
+                    # Маркер языка
+                    if has_cyrillic(stem):
+                        parts.append('русская русский на русском')
+
                     parts.append(stem)
                     search_text = " ".join(filter(bool, parts))
                     vector_db.add_text(search_text, payload)
 
+                # ----- VIDEO -----
                 elif ftype == 'video':
                     parts = ['видео фильм кино']
                     if title:
@@ -134,6 +190,10 @@ class MLWorker(QThread):
                         plot = enriched['imdb'].get('plot', '')
                         if plot:
                             parts.append(plot)
+
+                    if has_cyrillic(stem):
+                        parts.append('русское кино русский фильм')
+
                     parts.append(stem)
                     search_text = " ".join(filter(bool, parts))
                     vector_db.add_text(search_text, payload)
@@ -149,6 +209,10 @@ class MLWorker(QThread):
             self.log_signal.emit(f"[ОШИБКА] {str(e)}")
             self.finished_signal.emit(None)
 
+
+# ============================================================================
+# ОСНОВНОЕ ОКНО
+# ============================================================================
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -253,21 +317,23 @@ class MainWindow(QMainWindow):
 
         raw_results = self.vector_db.search(query, k=5)
 
-        # Разные пороги: фото требует более высокого сходства
-        # чтобы аудио и видео не терялись на фоне CLIP-изображений
-        valid_results = []
-        for r in raw_results:
-            if r['type'] == '📸 [ФОТО]' and r['score'] >= 60.0:
-                valid_results.append(r)
-            elif r['type'] != '📸 [ФОТО]' and r['score'] >= 45.0:
-                valid_results.append(r)
+        # Единый порог для обоих каналов — CLIP даёт честные значения
+        # (без искусственного растягивания), поэтому применяется
+        # одинаковый порог уверенности.
+        SCORE_THRESHOLD = 25.0
+
+        valid_results = [r for r in raw_results if r['score'] >= SCORE_THRESHOLD]
 
         if not valid_results:
             self.log_to_console("[-] Совпадений с высокой уверенностью не найдено.")
-            QMessageBox.warning(self, "Результат", "По вашему запросу ничего не найдено.\nПопробуйте переформулировать.")
+            QMessageBox.warning(
+                self,
+                "Результат",
+                "По вашему запросу ничего не найдено.\nПопробуйте переформулировать."
+            )
             return
 
-        res_text = "Найдены файлы (Уверенность ИИ > 45%):\n\n"
+        res_text = f"Найдены файлы (Уверенность ИИ > {int(SCORE_THRESHOLD)}%):\n\n"
         for i, r in enumerate(valid_results[:3], 1):
             file_name = r['payload'].get('real_file_name', 'Неизвестный файл')
             res_text += f"{i}. {r['type']} {file_name} (Сходство: {r['score']}%)\n"
